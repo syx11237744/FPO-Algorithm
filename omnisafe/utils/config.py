@@ -127,6 +127,9 @@ class Config(dict):
     normalized_obs: bool
     max_len: int
     num_threads: int
+    penalty_term_out: float
+    penalty_term_in: float
+    feasibility_threshold: float
 
     def __init__(self, **kwargs: Any) -> None:
         """Initialize an instance of :class:`Config`."""
