@@ -29,7 +29,7 @@ class FPOAdapter(OnPolicyAdapter):
         Args:
             steps_per_epoch (int): Number of steps per epoch.
             agent (ConstraintActorCritic): Constraint actor-critic, including actor , reward critic
-                and cost critic.
+                and feasibility critic.
             buffer (VectorOnPolicyBuffer): Vector on-policy buffer.
             logger (Logger): Logger, to log ``EpRet``, ``EpCost``, ``EpLen``.
         """
@@ -52,14 +52,16 @@ class FPOAdapter(OnPolicyAdapter):
             logger.store({'Value/reward': value_r})
 
             #! 我需要确定的一个点，就是cost是不是0，1取值的，如果是的话，那么我们的实现没有问题，否则需要转换成0，1取值
-            # 通过观察wandb可以发现cost并不是0，1取值的，而是float的连续取值，因此我们要把非0的值转换成1
-            # 设置一个小的阈值，将cost二值化为0/1
-            COST_THRESHOLD = 1e-6  
-            is_cost_one = cost > COST_THRESHOLD
-            cost = int(is_cost_one)  # 将boolean转换为0/1
+            # 通过观察wandb可以发现cost并不是0，1取值的? 但是我输出的时候发现基本都是0，1，我在buffer里面assert了，有问题就终止了
+            # print("cost: ", cost)
+            # print("cost shape:", cost.shape)
+            # exit()
+            # COST_THRESHOLD = 1e-6  
+            # is_cost_one = cost > COST_THRESHOLD
+            # cost = int(is_cost_one)  
                 
             buffer.store(
-                is_cost_one=is_cost_one,
+                # is_cost_one=is_cost_one,
                 obs=obs,
                 act=act,
                 reward=reward,

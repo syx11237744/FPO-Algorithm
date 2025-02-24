@@ -1,7 +1,7 @@
+from __future__ import annotations
 
 from omnisafe.models.actor_critic import ActorCritic
 
-from __future__ import annotations
 
 import torch
 from torch import optim

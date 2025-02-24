@@ -6,17 +6,17 @@ conda activate omnisafe
 export WANDB_API_KEY="07a341b17ceb53dc437556bdf4f18df47002595d"
 
 # 设置环境变量
-export CUDA_VISIBLE_DEVICES=0 
-
+export CUDA_VISIBLE_DEVICES=1
+export PYTHONPATH="/home/sunyuanxu/sunyuanxu/FPO-Algorithm:$PYTHONPATH"
 # 默认参数
-ALGO="PPOLag"
+ALGO="FPO"
 ENV_ID="SafetyPointGoal1-v0"
 PARALLEL=1
 TOTAL_STEPS=10000000
 DEVICE="cuda:0"
 VECTOR_ENV_NUMS=20
 TORCH_THREADS=16
-# !
+
 # cost_limit: 0
 
 # 运行训练脚本
@@ -28,5 +28,4 @@ python train_policy.py \
     --device ${DEVICE} \
     --vector-env-nums ${VECTOR_ENV_NUMS} \
     --torch-threads ${TORCH_THREADS} \
-    --use_wandb \
     "$@"

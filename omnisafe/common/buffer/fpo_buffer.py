@@ -20,7 +20,7 @@ class FPOBuffer(OnPolicyBuffer):
         advantage_estimator: AdvatageEstimator,
         penalty_coefficient: float = 0,
         standardized_adv_r: bool = False,
-        standardized_adv_c: bool = False,
+        # standardized_adv_c: bool = False,
         device: torch.device = DEVICE_CPU,
     ) -> None:
         """Initialize an instance of :class:`FPOBuffer`."""
@@ -35,12 +35,17 @@ class FPOBuffer(OnPolicyBuffer):
             lam_c=lam_c,
             penalty_coefficient=penalty_coefficient,
             standardized_adv_r=standardized_adv_r,
-            standardized_adv_c=standardized_adv_c,
+            standardized_adv_c=False,
         )
+        self._lam_c = lam_c
         self.cost_one_positions: list[int] = []  # 记录cost=1的轨迹位置
+        self.data['value_feasibility'] = torch.zeros((size,), dtype=torch.float32, device=device)
+        self.data['adv_f'] = torch.zeros((size,), dtype=torch.float32, device=device)
+        self.data['target_value_f'] = torch.zeros((size,), dtype=torch.float32, device=device)
+        self.data['deltas_f'] = torch.zeros((size,), dtype=torch.float32, device=device)
         assert advantage_estimator == "gae", 'FPOBuffer only supports GAE advantage estimator.'
 
-    def store(self, is_cost_one: bool, **data: torch.Tensor) -> None:
+    def store(self, **data: torch.Tensor) -> None:
         """Store data into the buffer and record positions where cost equals one.
 
         #? 除了一般的数据或许还需要一个数据的存储是Feasible Function对于这个状态的输出, 那么我们的adapter就需要传进来这个数据，
@@ -52,9 +57,13 @@ class FPOBuffer(OnPolicyBuffer):
             data (torch.Tensor): The data to store.
         """
         assert self.ptr < self.max_size, 'No more space in the buffer!'
+        # import pdb
+        # pdb.set_trace()
         for key, value in data.items():
             self.data[key][self.ptr] = value
-        if is_cost_one:
+        cost = data.get('cost', torch.tensor(0)).item()
+        assert cost in (0, 1), f'Cost value must be 0 or 1, but got {cost}'
+        if cost == 1:
             self.cost_one_positions.append(self.ptr - self.path_start_idx)
         self.ptr += 1
 
@@ -70,6 +79,8 @@ class FPOBuffer(OnPolicyBuffer):
             'discounted_ret': self.data['discounted_ret'],
             'adv_f': self.data['adv_f'],
             'target_value_f': self.data['target_value_f'],
+            'deltas_f': self.data['deltas_f'],
+            'value_feasibility': self.data['value_feasibility']
         }
 
         adv_mean, adv_std, *_ = distributed.dist_statistics_scalar(data['adv_r'])
@@ -102,14 +113,15 @@ class FPOBuffer(OnPolicyBuffer):
         
         rewards = torch.cat([self.data['reward'][path_slice], last_value_r])
         values_r = torch.cat([self.data['value_r'][path_slice], last_value_r])
-        costs = self.data['cost'][path_slice]
-        values_feasibility = self.data['value_feasibility'][path_slice]
-
+        # costs = self.data['cost'][path_slice]
+        # values_feasibility = self.data['value_feasibility'][path_slice]
+        costs = torch.cat([self.data['cost'][path_slice], last_value_feasibility])
+        values_feasibility = torch.cat([self.data['value_feasibility'][path_slice], last_value_feasibility])
 
         discountred_ret = discount_cumsum(rewards, self._gamma)[:-1]
         self.data['discounted_ret'][path_slice] = discountred_ret
-        penalties = torch.cat([costs,last_value_feasibility])
-        rewards -= self._penalty_coefficient * penalties
+        # penalties = torch.cat([costs,last_value_feasibility])
+        rewards -= self._penalty_coefficient * costs
 
         adv_r, target_value_r = self._calculate_adv_and_value_targets(
             values_r,
@@ -119,83 +131,154 @@ class FPOBuffer(OnPolicyBuffer):
 
         #! 想一下cost=1在最后一个位置会怎么样,应该不会怎么样，因为连乘的是乘到倒数第二个位置上的，所以不用担心？
         if len(self.cost_one_positions) == 0:
-            # If no cost=1 positions, process entire path as one segment
-            next_values = torch.cat([
-                values_feasibility[1:],
-                last_value_feasibility.unsqueeze(0)
-            ])
-            
-            adv_f, target_value_f = self._calculate_feasibility_advantage(
+            adv_f, target_value_f, deltas_f = self._calculate_feasibility_advantage(
                 costs=costs,
                 values_feasibility=values_feasibility,
-                next_values_feasibility=next_values,
                 lam=self._lam_c,
             )
         else:
-            # Create segment masks using vectorized operations
-            positions_tensor = torch.arange(path_length, device=self._device)
+            adv_f, target_value_f, deltas_f = self._process_segments(
+                path_length=path_length,
+                costs=costs,
+                values_feasibility=values_feasibility,
+            )
+            # # Create segment masks using vectorized operations
+            # positions_tensor = torch.arange(path_length, device=self._device)
+            # values_positions_tensor = torch.arange(path_length + 1, device=self._device)
             
-            # Create start positions including 0 and end positions including path_length
-            cost_one_tensor = torch.tensor(self.cost_one_positions, device=self._device)
-            start_positions = torch.cat([torch.tensor([0], device=self._device), cost_one_tensor + 1])
-            end_positions = torch.cat([cost_one_tensor + 1, torch.tensor([path_length], device=self._device)])
+            # # Create start positions including 0 and end positions including path_length
+            # cost_one_tensor = torch.tensor(self.cost_one_positions, device=self._device)
+            # start_positions = torch.cat([torch.tensor([0], device=self._device), cost_one_tensor + 1])
+            # end_positions = torch.cat([cost_one_tensor + 1, torch.tensor([path_length], device=self._device)])
             
-            # Initialize output tensors
-            adv_f = torch.zeros(path_length, device=self._device)
-            target_value_f = torch.zeros(path_length, device=self._device)
+            # # Initialize output tensors
+            # adv_f = torch.zeros(path_length, device=self._device)
+            # target_value_f = torch.zeros(path_length, device=self._device)
+            # deltas_f = torch.zeros(path_length, device=self._device)
             
             
-            # Process all segments in parallel
-            for start, end in zip(start_positions, end_positions):
-                if start >= end:
-                    continue
+            # # Process all segments in parallel
+            # for start, end in zip(start_positions, end_positions):
+            #     if start >= end:
+            #         continue
                     
-                # Create mask for current segment
-                segment_mask = (positions_tensor >= start) & (positions_tensor < end)
+            #     # Create mask for current segment
+            #     # import pdb
+            #     # pdb.set_trace()
+            #     segment_mask = (positions_tensor >= start) & (positions_tensor < end)
+            #     if not segment_mask.any():
+            #         continue
+
+            #     value_mask = (values_positions_tensor >= start) & (values_positions_tensor <= end)
                 
-                if not segment_mask.any():
-                    continue
                 
-                # Extract segment data using mask
-                segment_costs = costs[segment_mask]
-                segment_values = values_feasibility[segment_mask]
+            #     # Extract segment data using mask
+            #     segment_costs = costs[value_mask]
+            #     segment_values = values_feasibility[value_mask]
                 
-                # Handle next values
-                if end < path_length:
-                    segment_next_values = values_feasibility[start + 1:end + 1]
-                else:
-                    segment_next_values = torch.cat([
-                        values_feasibility[start + 1:end],
-                        last_value_feasibility.unsqueeze(0)
-                    ])
+            #     # # Handle next values
+            #     # if end < path_length:
+            #     #     segment_next_values = values_feasibility[start + 1:end + 2]
+            #     # else:
+            #     #     segment_next_values = torch.cat([
+            #     #         values_feasibility[start + 1:end + 1],
+            #     #         last_value_feasibility.unsqueeze(0)
+            #     #     ])
                 
-                # Calculate advantages for segment
-                segment_adv, segment_target = self._calculate_feasibility_advantage(
-                    costs=segment_costs,
-                    values_feasibility=segment_values,
-                    next_values_feasibility=segment_next_values,
-                    lam=self._lam_c,
-                )
-                
-                # Store results using mask
-                adv_f[segment_mask] = segment_adv
-                target_value_f[segment_mask] = segment_target
+            #     # Calculate advantages for segment
+            #     segment_adv, segment_target, deltas = self._calculate_feasibility_advantage(
+            #         costs=segment_costs,
+            #         values_feasibility=segment_values,
+            #         # next_values_feasibility=segment_next_values,
+            #         lam=self._lam_c,
+            #     )
+            #     # import pdb
+            #     # pdb.set_trace()
+            #     # Store results using mask
+            #     # print(segment_adv.shape)
+            #     # true_indices = torch.where(segment_mask)[0]
+            #     # print(f"True的位置: {true_indices}")
+            #     adv_f[segment_mask] = segment_adv
+            #     target_value_f[segment_mask] = segment_target
+            #     deltas_f[segment_mask] = deltas
 
         self.data['adv_r'][path_slice] = adv_r
         self.data['target_value_r'][path_slice] = target_value_r
         self.data['adv_f'][path_slice] = adv_f
         self.data['target_value_f'][path_slice] = target_value_f
+        self.data['deltas_f'][path_slice] = deltas_f
+        
 
         self.path_start_idx = self.ptr
         self.cost_one_positions = []
     
-    # TODO 应该还有一个接口？这个等在具体写actor的时候再写，看看能不能进行复用之类的
+    def _process_segments(
+        self,
+        path_length: int,
+        costs: torch.Tensor,
+        values_feasibility: torch.Tensor,
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        """
+        Process path segments separated by cost=1 positions.
+        
+        Args:
+            path_length: Length of the path
+            costs: Cost values tensor
+            values_feasibility: Feasibility values tensor
+        
+        Returns:
+            Tuple of (advantages, target values, deltas)
+        """
+        # Initialize tensors
+        adv_f = torch.zeros(path_length, device=self._device)
+        target_value_f = torch.zeros(path_length, device=self._device)
+        deltas_f = torch.zeros(path_length, device=self._device)
+        
+        # Create segment boundaries
+        cost_one_tensor = torch.tensor(self.cost_one_positions, device=self._device)
+        segments = torch.cat([
+            torch.tensor([0], device=self._device),
+            cost_one_tensor + 1,
+            torch.tensor([path_length], device=self._device)
+        ])
+        
+        # Process each segment
+        for start, end in zip(segments[:-1], segments[1:]):
+            if start >= end:
+                continue
+                
+            # Create masks for the current segment
+            # positions = torch.arange(path_length, device=self._device)
+            # value_positions = torch.arange(path_length + 1, device=self._device)
+            
+            # segment_mask = (positions >= start) & (positions < end)
+            # value_mask = (value_positions >= start) & (value_positions <= end)
+            
+            # if not segment_mask.any():
+            #     continue
+            path_slice = slice(start, end)
+            value_slice = slice(start, end + 1)
+            
+            # Calculate advantages for the segment
+            segment_adv, segment_target, segment_deltas = self._calculate_feasibility_advantage(
+                costs=costs[value_slice],
+                values_feasibility=values_feasibility[value_slice],
+                lam=self._lam_c,
+            )
+            
+            # Update results
+            adv_f[path_slice] = segment_adv
+            target_value_f[path_slice] = segment_target
+            deltas_f[path_slice] = segment_deltas
+        
+        return adv_f, target_value_f, deltas_f
+
 
     def _calculate_feasibility_advantage(
         self,
         costs: torch.Tensor,           # c(s)
         values_feasibility: torch.Tensor,    # F^π(s)
-        next_values_feasibility: torch.Tensor,  # F^π(s')
+        # next_values_feasibility: torch.Tensor,  # F^π(s') values_feasibility[1:]
         lam: float,
     ) -> tuple[torch.Tensor, torch.Tensor]:
         """Calculate feasibility advantage using GAE estimation.
@@ -209,22 +292,17 @@ class FPOBuffer(OnPolicyBuffer):
         """
         # 计算类似TD误差的值
         deltas = (
-            costs +  # c(s)
-            (1 - costs) * self._gamma * next_values_feasibility -  # (1-c(s))γF^π(s')
-            values_feasibility  # -F^π(s)
+            costs[:-1] +  # c(s)
+            (1 - costs[:-1]) * self._gamma * values_feasibility[1:] -  # (1-c(s))γF^π(s')
+            values_feasibility[:-1]  # -F^π(s)
         )
         
         # 使用GAE方式计算优势
-        advantages = discount_cumsum(deltas[:-1], self._gamma * lam)
+        advantages = discount_cumsum(deltas, self._gamma * lam).to(torch.float32)
         
-        # 计算值函数目标（类似于GAE中的value targets）
-        # 这里我们可以用累积的feasibility值作为目标
-        feasibility_targets = discount_cumsum(
-            costs + (1 - costs) * self._gamma * next_values_feasibility,
-            self._gamma
-        )[:-1]
+        feasibility_targets = advantages + values_feasibility[:-1]
         
-        return advantages, feasibility_targets
+        return advantages, feasibility_targets, deltas
 
 
 

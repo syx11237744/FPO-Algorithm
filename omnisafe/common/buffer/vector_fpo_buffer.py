@@ -1,5 +1,6 @@
 
 import torch
+from typing import Dict, List, Optional, Tuple, Union
 
 from omnisafe.common.buffer import FPOBuffer
 from omnisafe.typing import DEVICE_CPU, AdvatageEstimator, OmnisafeSpace
@@ -17,14 +18,14 @@ class VectorFPOBuffer(FPOBuffer):
         advantage_estimator: AdvatageEstimator,
         penalty_coefficient: float,
         standardized_adv_r: bool,
-        standardized_adv_c: bool,
+        # standardized_adv_c: bool,
         num_envs: int = 1,
         device: torch.device = DEVICE_CPU,
     ) -> None:
         """Initialize an instance of :class:`VectorFPOBuffer`."""
         self._num_buffers: int = num_envs
         self._standardized_adv_r: bool = standardized_adv_r
-        self._standardized_adv_c: bool = standardized_adv_c
+        # self._standardized_adv_c: bool = standardized_adv_c
 
         if num_envs < 1:
             raise ValueError('num_envs must be greater than 0.')
@@ -48,15 +49,15 @@ class VectorFPOBuffer(FPOBuffer):
         """Number of buffers."""
         return self._num_buffers
 
-    def store(self, is_cost_one: bool, **data: torch.Tensor) -> None:
+    def store(self, **data: torch.Tensor) -> None:
         """Store vectorized data into vectorized buffer."""
         for i, buffer in enumerate(self.buffers):
-            buffer.store(is_cost_one = is_cost_one, **{k: v[i] for k, v in data.items()})
+            buffer.store(**{k: v[i] for k, v in data.items()})
 
     def finish_path(
         self,
-        last_value_r: torch.Tensor | None = None,
-        last_value_feasibility: torch.Tensor | None = None,
+        last_value_r: Optional[torch.Tensor] = None,
+        last_value_feasibility: Optional[torch.Tensor] = None,
         idx: int = 0,
     ) -> None:
         """Get the data in the buffer.
@@ -65,7 +66,7 @@ class VectorFPOBuffer(FPOBuffer):
         """
         self.buffers[idx].finish_path(last_value_r, last_value_feasibility)
 
-    def get(self) -> dict[str, torch.Tensor]:
+    def get(self) -> Dict[str, torch.Tensor]:
         """Get the data in the buffer.
 
         We provide a trick to standardize the advantages of state-action pairs. We calculate the

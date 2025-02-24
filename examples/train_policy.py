@@ -17,6 +17,7 @@
 import argparse
 
 import omnisafe
+print(omnisafe.__file__)
 from omnisafe.utils.tools import custom_cfgs_to_dict, update_dict
 
 
