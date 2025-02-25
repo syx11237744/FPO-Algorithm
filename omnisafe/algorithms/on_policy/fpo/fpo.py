@@ -31,7 +31,7 @@ from omnisafe.algorithms import registry
 from omnisafe.algorithms.on_policy.base import PolicyGradient
 from omnisafe.common.buffer import VectorFPOBuffer
 from omnisafe.common.logger import Logger
-from omnisafe.models.actor_critic import FPOActorCritic
+from omnisafe.models.actor_critic import ConstraintActorCritic
 from omnisafe.utils import distributed
 from omnisafe.common.lagrange import Lagrange
 
@@ -73,34 +73,6 @@ class FPO(PolicyGradient):
             // self._cfgs.train_cfgs.vector_env_nums
         )
 
-    def _init_model(self) -> None:
-        """Initialize the model.
-
-        OmniSafe uses :class:`omnisafe.models.actor_critic.FPO_actor_critic.FPOActorCritic`
-        as the default model.
-
-        User can customize the model by inheriting this method.
-
-        Examples:
-            >>> def _init_model(self) -> None:
-            ...     self._actor_critic = CustomActorCritic()
-        """
-        self._actor_critic: FPOActorCritic = FPOActorCritic(
-            obs_space=self._env.observation_space,
-            act_space=self._env.action_space,
-            model_cfgs=self._cfgs.model_cfgs,
-            epochs=self._cfgs.train_cfgs.epochs,
-        ).to(self._device)
-
-        if distributed.world_size() > 1:
-            distributed.sync_params(self._actor_critic)
-
-        if self._cfgs.model_cfgs.exploration_noise_anneal:
-            self._actor_critic.set_annealing(
-                epochs=[0, self._cfgs.train_cfgs.epochs],
-                std=self._cfgs.model_cfgs.std_range,
-            )
-
     def _init(self) -> None:
         """The initialization of the algorithm.
 
@@ -128,8 +100,8 @@ class FPO(PolicyGradient):
         )
         self._lagrange_in_region: Lagrange = Lagrange(**self._cfgs.lagrange_cfgs)
         self._lagrange_out_region: Lagrange = Lagrange(**self._cfgs.lagrange_cfgs)
-        self._penalty_term_out = self._cfgs.algo_cfgs.init_penalty_term_out
-        self._penalty_term_in = self._cfgs.algo_cfgs.init_penalty_term_in
+        # self._penalty_term_out = self._cfgs.algo_cfgs.init_penalty_term_out
+        # self._penalty_term_in = self._cfgs.algo_cfgs.init_penalty_term_in
         self._feasibility_threshold = self._cfgs.algo_cfgs.feasibility_threshold
 
     def _init_log(self) -> None:
@@ -154,7 +126,7 @@ class FPO(PolicyGradient):
         +-----------------------+----------------------------------------------------------------------+
         | Loss/Loss_pi          | Loss of the policy network.                                          |
         +-----------------------+----------------------------------------------------------------------+
-        | Loss/Loss_feasibility_critic | Loss of the feasibility critic network.                                     |
+        | Loss/Loss_cost_critic | Loss of the feasibility critic network.                                     |
         +-----------------------+----------------------------------------------------------------------+
         | Train/Entropy         | Entropy of the policy network.                                       |
         +-----------------------+----------------------------------------------------------------------+
@@ -224,7 +196,7 @@ class FPO(PolicyGradient):
 
         # if self._cfgs.algo_cfgs.use_feasibility:
             # log information about feasibility critic
-        self._logger.register_key('Loss/Loss_feasibility_critic', delta=True)
+        self._logger.register_key('Loss/Loss_cost_critic', delta=True)
         self._logger.register_key('Value/feasibility')
 
         self._logger.register_key('Time/Total')
@@ -232,113 +204,43 @@ class FPO(PolicyGradient):
         self._logger.register_key('Time/Update')
         self._logger.register_key('Time/Epoch')
         self._logger.register_key('Time/FPS')
+
         self._logger.register_key('Train/penalty_term_in')
         self._logger.register_key('Train/penalty_term_out')
-
-
-        
-
-        self._logger.register_key('Train/penalty_in_region')
-        self._logger.register_key('Train/penalty_out_region')
+        self._logger.register_key('Train/in_to_out_ratio')
+        self._logger.register_key('Train/out_to_in_ratio')
         self._logger.register_key('Metrics/InRegionLagrangeMultiplier')
         self._logger.register_key('Metrics/OutRegionLagrangeMultiplier')
 
         # register environment specific keys
         for env_spec_key in self._env.env_spec_keys:
             self.logger.register_key(env_spec_key)
-
-    def learn(self) -> tuple[float, float, float]:
-        """This is main function for algorithm update.
-
-        It is divided into the following steps:
-
-        - :meth:`rollout`: collect interactive data from environment.
-        - :meth:`update`: perform actor/critic updates.
-        - :meth:`log`: epoch/update information for visualization and terminal log print.
-
-        Returns:
-            ep_ret: Average episode return in final epoch.
-            ep_cost: Average episode cost in final epoch.
-            ep_len: Average episode length in final epoch.
-        """
-        start_time = time.time()
-        self._logger.log('INFO: Start training')
-
-        for epoch in range(self._cfgs.train_cfgs.epochs):
-            epoch_time = time.time()
-
-            rollout_time = time.time()
-            self._env.rollout(
-                steps_per_epoch=self._steps_per_epoch,
-                agent=self._actor_critic,
-                buffer=self._buf,
-                logger=self._logger,
-            )
-            self._logger.store({'Time/Rollout': time.time() - rollout_time})
-
-            update_time = time.time()
-            self._update()
-            self._logger.store({'Time/Update': time.time() - update_time})
-
-            if self._cfgs.model_cfgs.exploration_noise_anneal:
-                self._actor_critic.annealing(epoch)
-
-            if self._cfgs.model_cfgs.actor.lr is not None:
-                self._actor_critic.actor_scheduler.step()
-
-            self._logger.store(
-                {
-                    'TotalEnvSteps': (epoch + 1) * self._cfgs.algo_cfgs.steps_per_epoch,
-                    'Time/FPS': self._cfgs.algo_cfgs.steps_per_epoch / (time.time() - epoch_time),
-                    'Time/Total': (time.time() - start_time),
-                    'Time/Epoch': (time.time() - epoch_time),
-                    'Train/Epoch': epoch,
-                    'Train/LR': (
-                        0.0
-                        if self._cfgs.model_cfgs.actor.lr is None
-                        else self._actor_critic.actor_scheduler.get_last_lr()[0]
-                    ),
-                },
-            )
-
-            self._logger.dump_tabular()
-
-            # save model to disk
-            if (epoch + 1) % self._cfgs.logger_cfgs.save_model_freq == 0 or (
-                epoch + 1
-            ) == self._cfgs.train_cfgs.epochs:
-                self._logger.torch_save()
-
-        ep_ret = self._logger.get_stats('Metrics/EpRet')[0]
-        ep_cost = self._logger.get_stats('Metrics/EpCost')[0]
-        ep_len = self._logger.get_stats('Metrics/EpLen')[0]
-        self._logger.close()
-        self._env.close()
-
-        return ep_ret, ep_cost, ep_len
+    
     def _update(self) -> None:
         # import pdb; pdb.set_trace()
         
-         # note that logger already uses MPI statistics across all processes..
-        penalty_term_in = self._penalty_term_in
-        penalty_term_out = self._penalty_term_out
+        # then update the policy and value function
+        data = self._buf.get()
+        self._update_actor_critic(data)
+
+        # 计算cg 和 penalty_term_in and out
+        penalty_term_in, penalty_term_out = self._calculate_penalty_term_and_cg(data)
+
+        # note that logger already uses MPI statistics across all processes..
         assert not np.isnan(penalty_term_in), 'penalty_term_in for updating lagrange multiplier is nan'
         assert not np.isnan(penalty_term_out), 'penalty_term_out for updating lagrange multiplier is nan'
         
         # first update Lagrange multiplier parameter
         self._lagrange_in_region.update_lagrange_multiplier(penalty_term_in)
         self._lagrange_out_region.update_lagrange_multiplier(penalty_term_out)
-        # then update the policy and value function
-        self._update_()
-
-        self._penalty_term_in = self._logger.get_stats('Train/penalty_term_in')[0]
-        self._penalty_term_out = self._logger.get_stats('Train/penalty_term_out')[0]
-
+        
         self._logger.store({'Metrics/InRegionLagrangeMultiplier': self._lagrange_in_region.lagrangian_multiplier})
         self._logger.store({'Metrics/OutRegionLagrangeMultiplier': self._lagrange_out_region.lagrangian_multiplier})
 
-
-    def _update_(self) -> None:
+    def _update_actor_critic(
+            self,
+            data: dict[str, torch.Tensor],
+        ) -> None:
         """Update actor, critic.
 
         -  Get the ``data`` from buffer
@@ -363,7 +265,7 @@ class FPO(PolicyGradient):
 
 
         -  Update value net by :meth:`_update_reward_critic`.
-        -  Update feasibility net by :meth:`_update_feasibility_critic`.
+        -  Update feasibility net by :meth:`_update_cost_critic`.
         -  Update policy net by :meth:`_update_actor`.
 
         The basic process of each update is as follows:
@@ -375,8 +277,8 @@ class FPO(PolicyGradient):
         #. Repeat steps 2, 3 until the number of mini-batch data is used up.
         #. Repeat steps 2, 3, 4 until the KL divergence violates the limit.
         """
-        data = self._buf.get()
-        obs, act, logp, target_value_r, target_value_f, adv_r, adv_f, deltas_f, value_feasibility = (
+        # data = self._buf.get()
+        obs, act, logp, target_value_r, target_value_f, adv_r, adv_f, value_feasibility = (
             data['obs'],
             data['act'],
             data['logp'],
@@ -384,7 +286,6 @@ class FPO(PolicyGradient):
             data['target_value_f'],
             data['adv_r'],
             data['adv_f'],
-            data['deltas_f'],
             data['value_feasibility']
         )
 
@@ -392,7 +293,7 @@ class FPO(PolicyGradient):
         old_distribution = self._actor_critic.actor(obs)
 
         dataloader = DataLoader(
-            dataset=TensorDataset(obs, act, logp, target_value_r, target_value_f, adv_r, adv_f, deltas_f, value_feasibility),
+            dataset=TensorDataset(obs, act, logp, target_value_r, target_value_f, adv_r, adv_f, value_feasibility),
             batch_size=self._cfgs.algo_cfgs.batch_size,
             shuffle=True,
         )
@@ -409,13 +310,11 @@ class FPO(PolicyGradient):
                 target_value_f,
                 adv_r,
                 adv_f,
-                deltas_f,
                 value_feasibility,
             ) in dataloader:
                 self._update_reward_critic(obs, target_value_r)
-                #if self._cfgs.algo_cfgs.use_feasibility:
-                self._update_feasibility_critic(obs, target_value_f)
-                self._update_actor(obs, act, logp, adv_r, value_feasibility, deltas_f)
+                self._update_cost_critic(obs, target_value_f)
+                self._update_actor(obs, act, logp, adv_r, value_feasibility, adv_f)
 
             new_distribution = self._actor_critic.actor(original_obs)
 
@@ -442,86 +341,6 @@ class FPO(PolicyGradient):
             },
         )
 
-    def _update_reward_critic(self, obs: torch.Tensor, target_value_r: torch.Tensor) -> None:
-        r"""Update value network under a double for loop.
-
-        The loss function is ``MSE loss``, which is defined in ``torch.nn.MSELoss``.
-        Specifically, the loss function is defined as:
-
-        .. math::
-
-            L = \frac{1}{N} \sum_{i=1}^N (\hat{V} - V)^2
-
-        where :math:`\hat{V}` is the predicted cost and :math:`V` is the target cost.
-
-        #. Compute the loss function.
-        #. Add the ``critic norm`` to the loss function if ``use_critic_norm`` is ``True``.
-        #. Clip the gradient if ``use_max_grad_norm`` is ``True``.
-        #. Update the network by loss function.
-
-        Args:
-            obs (torch.Tensor): The ``observation`` sampled from buffer.
-            target_value_r (torch.Tensor): The ``target_value_r`` sampled from buffer.
-        """
-        self._actor_critic.reward_critic_optimizer.zero_grad()
-        loss = nn.functional.mse_loss(self._actor_critic.reward_critic(obs)[0], target_value_r)
-
-        if self._cfgs.algo_cfgs.use_critic_norm:
-            for param in self._actor_critic.reward_critic.parameters():
-                loss += param.pow(2).sum() * self._cfgs.algo_cfgs.critic_norm_coef
-
-        loss.backward()
-
-        if self._cfgs.algo_cfgs.use_max_grad_norm:
-            clip_grad_norm_(
-                self._actor_critic.reward_critic.parameters(),
-                self._cfgs.algo_cfgs.max_grad_norm,
-            )
-        distributed.avg_grads(self._actor_critic.reward_critic)
-        self._actor_critic.reward_critic_optimizer.step()
-
-        self._logger.store({'Loss/Loss_reward_critic': loss.mean().item()})
-
-    def _update_feasibility_critic(self, obs: torch.Tensor, target_value_f: torch.Tensor) -> None:
-        r"""Update value network under a double for loop.
-
-        The loss function is ``MSE loss``, which is defined in ``torch.nn.MSELoss``.
-        Specifically, the loss function is defined as:
-
-        .. math::
-
-            L = \frac{1}{N} \sum_{i=1}^N (\hat{V} - V)^2
-
-        where :math:`\hat{V}` is the predicted cost and :math:`V` is the target cost.
-
-        #. Compute the loss function.
-        #. Add the ``critic norm`` to the loss function if ``use_critic_norm`` is ``True``.
-        #. Clip the gradient if ``use_max_grad_norm`` is ``True``.
-        #. Update the network by loss function.
-
-        Args:
-            obs (torch.Tensor): The ``observation`` sampled from buffer.
-            target_value_c (torch.Tensor): The ``target_value_c`` sampled from buffer.
-        """
-        self._actor_critic.feasibility_critic_optimizer.zero_grad()
-        loss = nn.functional.mse_loss(self._actor_critic.feasibility_critic(obs)[0], target_value_f)
-
-        if self._cfgs.algo_cfgs.use_critic_norm:
-            for param in self._actor_critic.feasibility_critic.parameters():
-                loss += param.pow(2).sum() * self._cfgs.algo_cfgs.critic_norm_coef
-
-        loss.backward()
-
-        if self._cfgs.algo_cfgs.use_max_grad_norm:
-            clip_grad_norm_(
-                self._actor_critic.feasibility_critic.parameters(),
-                self._cfgs.algo_cfgs.max_grad_norm,
-            )
-        distributed.avg_grads(self._actor_critic.feasibility_critic)
-        self._actor_critic.feasibility_critic_optimizer.step()
-
-        self._logger.store({'Loss/Loss_feasibility_critic': loss.mean().item()})
-
     def _update_actor(  # pylint: disable=too-many-arguments
         self,
         obs: torch.Tensor,
@@ -529,7 +348,7 @@ class FPO(PolicyGradient):
         logp: torch.Tensor,
         adv_r: torch.Tensor,
         value_feasibility: torch.Tensor,
-        deltas_f: torch.Tensor,
+        adv_f: torch.Tensor,
     ) -> None:
         """Update policy network under a double for loop.
 
@@ -550,8 +369,7 @@ class FPO(PolicyGradient):
             adv_r (torch.Tensor): The ``reward_advantage`` sampled from buffer.
             adv_f (torch.Tensor): The ``feasibility_advantage`` sampled from buffer.
         """
-        # adv = self._compute_adv_surrogate(adv_r, logp, value_feasibility, deltas_f)
-        loss = self._loss_pi(obs, act, logp, adv_r, value_feasibility, deltas_f)
+        loss = self._loss_pi(obs, act, logp, adv_r, value_feasibility, adv_f)
         self._actor_critic.actor_optimizer.zero_grad()
         loss.backward()
         if self._cfgs.algo_cfgs.use_max_grad_norm:
@@ -569,7 +387,7 @@ class FPO(PolicyGradient):
         logp: torch.Tensor,
         adv_r: torch.Tensor,
         value_feasibility: torch.Tensor,
-        deltas_f: torch.Tensor
+        adv_f: torch.Tensor
     ) -> torch.Tensor:
         r"""Computing pi/actor loss.
 
@@ -610,11 +428,11 @@ class FPO(PolicyGradient):
 
         
         # For in-region samples
-        penalty_term_in = leaky_relu(deltas_f * ratio + value_feasibility - self._feasibility_threshold)
+        penalty_term_in = leaky_relu(adv_f * ratio + value_feasibility - self._feasibility_threshold)
         penalty_in = torch.where(mask_in_region, penalty_term_in * lagrangian_multiplier_in_region, torch.zeros_like(penalty_term_in))
 
         # For out-region samples
-        penalty_term_out = leaky_relu(deltas_f * ratio) 
+        penalty_term_out = leaky_relu(adv_f * ratio) 
         penalty_out = torch.where(mask_out_region, penalty_term_out * lagrangian_multiplier_out_region, torch.zeros_like(penalty_term_out))
 
         total_penalty = penalty_in + penalty_out
@@ -635,10 +453,49 @@ class FPO(PolicyGradient):
                 'Train/PolicyRatio': ratio,
                 'Train/penalty_term_in': penalty_term_in ,
                 'Train/penalty_term_out': penalty_term_out ,
-                'Train/penalty_in_region': lagrangian_multiplier_in_region,
-                'Train/penalty_out_region': lagrangian_multiplier_out_region,
                 'Train/PolicyStd': std,
                 'Loss/Loss_pi': loss.mean().item(),
             },
         )
         return loss
+    
+    def _calculate_penalty_term_and_cg(
+        self,
+        data: dict[str, torch.Tensor],
+    ) -> tuple[float, float]:
+        obs, logp, adv_f, value_feasibility = (
+            data['obs'],
+            data['logp'],
+            data['adv_f'],
+            data['value_feasibility']
+        )
+
+        _, _, value_feasibility_, logp_ = self._actor_critic.step(obs)
+
+        leaky_relu = torch.nn.LeakyReLU()
+        ratio = torch.exp(logp_ - logp)
+
+        mask_in_region = value_feasibility < self._feasibility_threshold
+        mask_out_region = ~mask_in_region
+
+        penalty_term_in = leaky_relu(adv_f * ratio + value_feasibility - self._feasibility_threshold)
+        penalty_term_in = torch.where(mask_in_region, penalty_term_in, torch.zeros_like(penalty_term_in)).mean().item()
+
+        # For out-region samples
+        penalty_term_out = leaky_relu(adv_f * ratio)
+        penalty_term_out = torch.where(mask_out_region, penalty_term_out, torch.zeros_like(penalty_term_out)).mean().item()
+
+        mask_in_region_ = value_feasibility_ < self._feasibility_threshold
+        mask_out_region_ = ~mask_in_region_
+
+        # 计算过去在in region的但是之后在out region的样本的比例
+        in_to_out_ratio = torch.sum(mask_in_region & mask_out_region_) / torch.sum(mask_in_region)
+        # 计算过去在out region的但是之后在in region的样本的比例
+        out_to_in_ratio = torch.sum(mask_out_region & mask_in_region_) / torch.sum(mask_out_region)
+
+        self._logger.store({'Train/in_to_out_ratio': in_to_out_ratio})
+        self._logger.store({'Train/out_to_in_ratio': out_to_in_ratio})
+        self._logger.store({'Train/penalty_term_in': penalty_term_in})
+        self._logger.store({'Train/penalty_term_out': penalty_term_out})
+
+        return penalty_term_in, penalty_term_out

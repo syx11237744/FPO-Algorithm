@@ -8,7 +8,7 @@ from rich.progress import track
 
 from omnisafe.adapter import OnPolicyAdapter
 from omnisafe.utils.config import Config
-from omnisafe.models.actor_critic import FPOActorCritic
+from omnisafe.models.actor_critic import ConstraintActorCritic
 from omnisafe.common.buffer import FPOBuffer
 from omnisafe.common.logger import Logger
 
@@ -16,7 +16,7 @@ class FPOAdapter(OnPolicyAdapter):
     def rollout(  # pylint: disable=too-many-locals
         self,
         steps_per_epoch: int,
-        agent: FPOActorCritic,
+        agent: ConstraintActorCritic,
         buffer: FPOBuffer,
         logger: Logger,
     ) -> None:
@@ -50,15 +50,6 @@ class FPOAdapter(OnPolicyAdapter):
             if self._cfgs.algo_cfgs.use_cost:
                 logger.store({'Value/feasibility': value_feasibility})
             logger.store({'Value/reward': value_r})
-
-            #! 我需要确定的一个点，就是cost是不是0，1取值的，如果是的话，那么我们的实现没有问题，否则需要转换成0，1取值
-            # 通过观察wandb可以发现cost并不是0，1取值的? 但是我输出的时候发现基本都是0，1，我在buffer里面assert了，有问题就终止了
-            # print("cost: ", cost)
-            # print("cost shape:", cost.shape)
-            # exit()
-            # COST_THRESHOLD = 1e-6  
-            # is_cost_one = cost > COST_THRESHOLD
-            # cost = int(is_cost_one)  
                 
             buffer.store(
                 # is_cost_one=is_cost_one,
