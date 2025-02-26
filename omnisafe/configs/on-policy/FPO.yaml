@@ -56,7 +56,7 @@ defaults:
     # standardize reward advantage
     standardized_rew_adv: True
     # standardize cost advantage
-    standardized_cost_adv: False
+    standardized_cost_adv: True
     # penalty coefficient
     penalty_coef: 0.0
     # use cost 
@@ -70,7 +70,7 @@ defaults:
   # logger configurations
   logger_cfgs:
     # use wandb for logging
-    use_wandb: True
+    use_wandb: False
     # wandb project name
     wandb_project: omnisafe
     # use tensorboard for logging

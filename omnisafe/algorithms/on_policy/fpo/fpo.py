@@ -93,7 +93,7 @@ class FPO(PolicyGradient):
             lam_c=self._cfgs.algo_cfgs.lam_c,
             advantage_estimator=self._cfgs.algo_cfgs.adv_estimation_method,
             standardized_adv_r=self._cfgs.algo_cfgs.standardized_rew_adv,
-            # standardized_adv_c=self._cfgs.algo_cfgs.standardized_cost_adv,
+            standardized_adv_c=self._cfgs.algo_cfgs.standardized_cost_adv,
             penalty_coefficient=self._cfgs.algo_cfgs.penalty_coef,
             num_envs=self._cfgs.train_cfgs.vector_env_nums,
             device=self._device,
@@ -188,7 +188,8 @@ class FPO(PolicyGradient):
 
         # log information about actor
         self._logger.register_key('Loss/Loss_pi', delta=True)
-        self._logger.register_key('Value/Adv')
+        self._logger.register_key('Value/Adv_r')
+        self._logger.register_key('Value/Adv_f')
 
         # log information about critic
         self._logger.register_key('Loss/Loss_reward_critic', delta=True)
@@ -207,11 +208,16 @@ class FPO(PolicyGradient):
 
         self._logger.register_key('Train/penalty_term_in')
         self._logger.register_key('Train/penalty_term_out')
-        self._logger.register_key('Train/in_to_out_ratio')
-        self._logger.register_key('Train/out_to_in_ratio')
+        self._logger.register_key('Train/penalty_in')
+        self._logger.register_key('Train/penalty_out')
         self._logger.register_key('Metrics/InRegionLagrangeMultiplier')
         self._logger.register_key('Metrics/OutRegionLagrangeMultiplier')
 
+        self._logger.register_key('Train/in_to_out_ratio')
+        self._logger.register_key('Train/out_to_in_ratio')
+        self._logger.register_key('Train/in_region_ratio')
+        self._logger.register_key('Train/neg_out_ratio')
+        self._logger.register_key('Train/neg_in_ratio')
         # register environment specific keys
         for env_spec_key in self._env.env_spec_keys:
             self.logger.register_key(env_spec_key)
@@ -336,7 +342,8 @@ class FPO(PolicyGradient):
         self._logger.store(
             {
                 'Train/StopIter': update_counts,  # pylint: disable=undefined-loop-variable
-                'Value/Adv': adv_r.mean().item(),
+                'Value/Adv_r': adv_r.mean().item(),
+                'Value/Adv_f': adv_f.mean().item(),
                 'Train/KL': final_kl,
             },
         )
@@ -420,30 +427,28 @@ class FPO(PolicyGradient):
         lagrangian_multiplier_in_region = self._lagrange_in_region.lagrangian_multiplier.item()
         lagrangian_multiplier_out_region = self._lagrange_out_region.lagrangian_multiplier.item()
         
-        mask_in_region = value_feasibility < self._feasibility_threshold
-        mask_out_region = ~mask_in_region
-
-        # Calculate penalty terms using LeakyReLU
-        leaky_relu = torch.nn.LeakyReLU()
-
-        
         # For in-region samples
-        penalty_term_in = leaky_relu(adv_f * ratio + value_feasibility - self._feasibility_threshold)
-        penalty_in = torch.where(mask_in_region, penalty_term_in * lagrangian_multiplier_in_region, torch.zeros_like(penalty_term_in))
+        term_in = adv_f * ratio + value_feasibility - self._feasibility_threshold
+        mask_in_region_positive = (term_in > 0) & (value_feasibility < self._feasibility_threshold)
+        penalty_in = torch.where(mask_in_region_positive, term_in * lagrangian_multiplier_in_region, torch.zeros_like(term_in))
 
         # For out-region samples
-        penalty_term_out = leaky_relu(adv_f * ratio) 
-        penalty_out = torch.where(mask_out_region, penalty_term_out * lagrangian_multiplier_out_region, torch.zeros_like(penalty_term_out))
+        term_out = adv_f * ratio
+        mask_out_region_positive = (term_out > 0) & (value_feasibility >= self._feasibility_threshold)
+        penalty_out = torch.where(mask_out_region_positive, term_out * lagrangian_multiplier_out_region, torch.zeros_like(term_out))
+
 
         total_penalty = penalty_in + penalty_out
         
-        ratio_cliped = torch.clamp(
+        ratio_cliped = torch.clamp( 
             ratio,
             1 - self._cfgs.algo_cfgs.clip,
             1 + self._cfgs.algo_cfgs.clip,
         )
-        adv = adv_r - total_penalty
-        loss = -torch.min(ratio * adv, ratio_cliped * adv).mean()
+        lagrangian_multiplier_term = mask_in_region_positive * lagrangian_multiplier_in_region + mask_out_region_positive * lagrangian_multiplier_out_region + 1
+
+        #! 这个地方我有点不太确定对不对
+        loss = ((-torch.min(ratio * adv_r, ratio_cliped * adv_r) + total_penalty) / lagrangian_multiplier_term).mean()
         loss -= self._cfgs.algo_cfgs.entropy_coef * distribution.entropy().mean()
         # useful extra info
         entropy = distribution.entropy().mean().item()
@@ -451,8 +456,8 @@ class FPO(PolicyGradient):
             {
                 'Train/Entropy': entropy,
                 'Train/PolicyRatio': ratio,
-                'Train/penalty_term_in': penalty_term_in ,
-                'Train/penalty_term_out': penalty_term_out ,
+                'Train/penalty_in': penalty_in.mean().item(),
+                'Train/penalty_out': penalty_out.mean().item(),
                 'Train/PolicyStd': std,
                 'Loss/Loss_pi': loss.mean().item(),
             },
@@ -472,27 +477,38 @@ class FPO(PolicyGradient):
 
         _, _, value_feasibility_, logp_ = self._actor_critic.step(obs)
 
-        leaky_relu = torch.nn.LeakyReLU()
+        relu = torch.nn.LeakyReLU()
         ratio = torch.exp(logp_ - logp)
 
         mask_in_region = value_feasibility < self._feasibility_threshold
         mask_out_region = ~mask_in_region
 
-        penalty_term_in = leaky_relu(adv_f * ratio + value_feasibility - self._feasibility_threshold)
-        penalty_term_in = torch.where(mask_in_region, penalty_term_in, torch.zeros_like(penalty_term_in)).mean().item()
+        term_in = adv_f * ratio + value_feasibility - self._feasibility_threshold
+        count_neg_in = torch.sum(torch.logical_and(term_in < 0, mask_in_region)).item()
+        in_region_count = torch.sum(mask_in_region).item()
+        neg_in_ratio = count_neg_in / in_region_count
 
-        # For out-region samples
-        penalty_term_out = leaky_relu(adv_f * ratio)
-        penalty_term_out = torch.where(mask_out_region, penalty_term_out, torch.zeros_like(penalty_term_out)).mean().item()
+        term_out = adv_f * ratio
+        count_neg_out = torch.sum(torch.logical_and(term_out < 0, mask_out_region)).item()
+        out_region_count = torch.sum(mask_out_region).item()
+        neg_out_ratio = count_neg_out / out_region_count
+
+        penalty_term_in = torch.where(mask_in_region, relu(term_in), torch.zeros_like(term_in)).mean().item()
+        penalty_term_out = torch.where(mask_out_region, relu(term_out), torch.zeros_like(term_out)).mean().item()
+
+        in_region_ratio = in_region_count / mask_in_region.shape[0]
 
         mask_in_region_ = value_feasibility_ < self._feasibility_threshold
         mask_out_region_ = ~mask_in_region_
 
         # 计算过去在in region的但是之后在out region的样本的比例
-        in_to_out_ratio = torch.sum(mask_in_region & mask_out_region_) / torch.sum(mask_in_region)
+        in_to_out_ratio = torch.sum(mask_in_region & mask_out_region_) / in_region_count
         # 计算过去在out region的但是之后在in region的样本的比例
-        out_to_in_ratio = torch.sum(mask_out_region & mask_in_region_) / torch.sum(mask_out_region)
+        out_to_in_ratio = torch.sum(mask_out_region & mask_in_region_) / out_region_count
 
+        self._logger.store({'Train/in_region_ratio': in_region_ratio})
+        self._logger.store({'Train/neg_out_ratio': neg_out_ratio})
+        self._logger.store({'Train/neg_in_ratio': neg_in_ratio})
         self._logger.store({'Train/in_to_out_ratio': in_to_out_ratio})
         self._logger.store({'Train/out_to_in_ratio': out_to_in_ratio})
         self._logger.store({'Train/penalty_term_in': penalty_term_in})

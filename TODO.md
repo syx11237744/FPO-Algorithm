@@ -1,2 +1,0 @@
-penalty_term_in 最外层更新
-cg 最外层更新

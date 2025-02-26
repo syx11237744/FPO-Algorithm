@@ -20,7 +20,7 @@ class FPOBuffer(OnPolicyBuffer):
         advantage_estimator: AdvatageEstimator,
         penalty_coefficient: float = 0,
         standardized_adv_r: bool = False,
-        # standardized_adv_c: bool = False,
+        standardized_adv_c: bool = False,
         device: torch.device = DEVICE_CPU,
     ) -> None:
         """Initialize an instance of :class:`FPOBuffer`."""
@@ -85,11 +85,11 @@ class FPOBuffer(OnPolicyBuffer):
         }
 
         adv_mean, adv_std, *_ = distributed.dist_statistics_scalar(data['adv_r'])
-        # cadv_mean, *_ = distributed.dist_statistics_scalar(data['adv_c'])
+        cadv_mean, *_ = distributed.dist_statistics_scalar(data['adv_f'])
         if self._standardized_adv_r:
             data['adv_r'] = (data['adv_r'] - adv_mean) / (adv_std + 1e-8)
-        # if self._standardized_adv_c:
-        #     data['adv_c'] = data['adv_c'] - cadv_mean
+        if self._standardized_adv_c:
+            data['adv_f'] = data['adv_f'] - cadv_mean
 
         return data
 

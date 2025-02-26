@@ -18,14 +18,14 @@ class VectorFPOBuffer(FPOBuffer):
         advantage_estimator: AdvatageEstimator,
         penalty_coefficient: float,
         standardized_adv_r: bool,
-        # standardized_adv_c: bool,
+        standardized_adv_c: bool,
         num_envs: int = 1,
         device: torch.device = DEVICE_CPU,
     ) -> None:
         """Initialize an instance of :class:`VectorFPOBuffer`."""
         self._num_buffers: int = num_envs
         self._standardized_adv_r: bool = standardized_adv_r
-        # self._standardized_adv_c: bool = standardized_adv_c
+        self._standardized_adv_c: bool = standardized_adv_c
 
         if num_envs < 1:
             raise ValueError('num_envs must be greater than 0.')
@@ -85,10 +85,10 @@ class VectorFPOBuffer(FPOBuffer):
         data = {k: torch.cat(v, dim=0) for k, v in data_pre.items()}
 
         adv_mean, adv_std, *_ = distributed.dist_statistics_scalar(data['adv_r'])
-        # cadv_mean, *_ = distributed.dist_statistics_scalar(data['adv_c'])
+        cadv_mean, *_ = distributed.dist_statistics_scalar(data['adv_f'])
         if self._standardized_adv_r:
             data['adv_r'] = (data['adv_r'] - adv_mean) / (adv_std + 1e-8)
-        # if self._standardized_adv_c:
-        #     data['adv_c'] = data['adv_c'] - cadv_mean
+        if self._standardized_adv_c:
+            data['adv_f'] = data['adv_f'] - cadv_mean
 
         return data
