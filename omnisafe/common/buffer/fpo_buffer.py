@@ -239,7 +239,7 @@ class FPOBuffer(OnPolicyBuffer):
         advantages = discount_cumsum(deltas, self._gamma * lam).to(torch.float32)
         
         # clip <= 1
-        feasibility_targets = torch.min(advantages + value_feasibility[:-1], torch.ones_like(advantages))
+        feasibility_targets = torch.clamp(advantages + value_feasibility[:-1], 0, 1)
         
         return advantages, feasibility_targets, deltas
 
