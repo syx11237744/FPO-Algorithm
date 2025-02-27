@@ -35,7 +35,7 @@ class FPOBuffer(OnPolicyBuffer):
             lam_c=lam_c,
             penalty_coefficient=penalty_coefficient,
             standardized_adv_r=standardized_adv_r,
-            standardized_adv_c=False,
+            standardized_adv_c=standardized_adv_c,
         )
         self._lam_c = lam_c
         self.cost_one_positions: list[int] = []  # 记录cost=1的轨迹位置
