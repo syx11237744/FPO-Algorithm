@@ -430,25 +430,24 @@ class FPO(PolicyGradient):
         # For in-region samples
         term_in = adv_f * ratio + value_feasibility - self._feasibility_threshold
         mask_in_region_positive = (term_in > 0) & (value_feasibility < self._feasibility_threshold)
-        penalty_in = torch.where(mask_in_region_positive, term_in * lagrangian_multiplier_in_region, torch.zeros_like(term_in))
+        penalty_in = torch.where(mask_in_region_positive, adv_f * lagrangian_multiplier_in_region, torch.zeros_like(term_in))
 
         # For out-region samples
         term_out = adv_f * ratio
         mask_out_region_positive = (term_out > 0) & (value_feasibility >= self._feasibility_threshold)
-        penalty_out = torch.where(mask_out_region_positive, term_out * lagrangian_multiplier_out_region, torch.zeros_like(term_out))
+        penalty_out = torch.where(mask_out_region_positive, adv_f * lagrangian_multiplier_out_region, torch.zeros_like(term_out))
 
-
-        total_penalty = penalty_in + penalty_out
+        lagrangian_multiplier_term = mask_in_region_positive * lagrangian_multiplier_in_region + mask_out_region_positive * lagrangian_multiplier_out_region + 1
+        adv = (adv_r - penalty_in - penalty_out) / lagrangian_multiplier_term
         
         ratio_cliped = torch.clamp( 
             ratio,
             1 - self._cfgs.algo_cfgs.clip,
             1 + self._cfgs.algo_cfgs.clip,
         )
-        lagrangian_multiplier_term = mask_in_region_positive * lagrangian_multiplier_in_region + mask_out_region_positive * lagrangian_multiplier_out_region + 1
 
         #! 这个地方我有点不太确定对不对
-        loss = ((-torch.min(ratio * adv_r, ratio_cliped * adv_r) + total_penalty) / lagrangian_multiplier_term).mean()
+        loss = -torch.min(ratio * adv, ratio_cliped * adv).mean()
         loss -= self._cfgs.algo_cfgs.entropy_coef * distribution.entropy().mean()
         # useful extra info
         entropy = distribution.entropy().mean().item()
