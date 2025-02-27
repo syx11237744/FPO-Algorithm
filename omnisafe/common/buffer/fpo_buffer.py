@@ -187,11 +187,11 @@ class FPOBuffer(OnPolicyBuffer):
             #! 需要对最后一个cost可能=1的情况进行特殊判断，不然会出现数据丢失的问题
             # 对于这种情况的话，start == end == path_length，那么我们给start - 1
             if start >= end:
-                if start == path_length and start > 0:
-                    # 处理最后一个位置的cost=1情况
-                    start = start - 1
-                else:
-                    continue
+                # if start == path_length and start > 0:
+                #     # 处理最后一个位置的cost=1情况
+                #     start = start - 1
+                # else:
+                continue
                 
             # Create masks for the current segment
             path_slice = slice(start, end)
