@@ -15,6 +15,7 @@ class FPOBuffer(OnPolicyBuffer):
         act_space: OmnisafeSpace,
         size: int,
         gamma: float,
+        cost_gamma: float,
         lam: float,
         lam_c: float,
         advantage_estimator: AdvatageEstimator,
@@ -29,6 +30,7 @@ class FPOBuffer(OnPolicyBuffer):
             act_space=act_space,
             size=size,
             gamma=gamma,
+            cost_gamma=cost_gamma,
             lam=lam,
             advantage_estimator=advantage_estimator,
             device=device,
@@ -37,6 +39,7 @@ class FPOBuffer(OnPolicyBuffer):
             standardized_adv_r=standardized_adv_r,
             standardized_adv_c=standardized_adv_c,
         )
+        self._cost_gamma = cost_gamma
         self._lam_c = lam_c
         self.cost_one_positions: list[int] = []  # 记录cost=1的轨迹位置
         self.data['value_feasibility'] = torch.zeros((size,), dtype=torch.float32, device=device)
@@ -81,16 +84,17 @@ class FPOBuffer(OnPolicyBuffer):
             'adv_f': self.data['adv_f'],
             'target_value_f': self.data['target_value_f'],
             'deltas_f': self.data['deltas_f'],
-            'value_feasibility': self.data['value_feasibility']
+            'value_feasibility': self.data['value_feasibility'],
         }
 
         adv_mean, adv_std, *_ = distributed.dist_statistics_scalar(data['adv_r'])
-        cadv_mean, *_ = distributed.dist_statistics_scalar(data['adv_f'])
+        cadv_mean, cadv_std, *_ = distributed.dist_statistics_scalar(data['adv_f'])
         if self._standardized_adv_r:
             data['adv_r'] = (data['adv_r'] - adv_mean) / (adv_std + 1e-8)
         if self._standardized_adv_c:
-            data['adv_f'] = data['adv_f'] - cadv_mean
-
+            data['standardized_adv_f'] = (data['adv_f'] - cadv_mean) / (cadv_std + 1e-8)
+        
+        data['cadv_mean'] = cadv_mean.unsqueeze(0)
         return data
 
 
@@ -231,12 +235,12 @@ class FPOBuffer(OnPolicyBuffer):
         # 计算类似TD误差的值
         deltas = (
             costs[:-1] +  # c(s)
-            (1 - costs[:-1]) * self._gamma * value_feasibility[1:] -  # (1-c(s))γF^π(s')
+            (1 - costs[:-1]) * self._cost_gamma * value_feasibility[1:] -  # (1-c(s))γF^π(s')
             value_feasibility[:-1]  # -F^π(s)
         )
         
         # 使用GAE方式计算优势
-        advantages = discount_cumsum(deltas, self._gamma * lam).to(torch.float32)
+        advantages = discount_cumsum(deltas, self._cost_gamma * lam).to(torch.float32)
         
         # clip <= 1
         feasibility_targets = torch.clamp(advantages + value_feasibility[:-1], 0, 1)

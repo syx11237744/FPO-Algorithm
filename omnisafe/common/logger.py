@@ -135,7 +135,9 @@ class Logger:  # pylint: disable=too-many-instance-attributes
 
         if self._use_wandb and self._maste_proc:  # pragma: no cover
             project: str = self._config.logger_cfgs.get('wandb_project', 'omnisafe')
-            name: str = f'{exp_name}-{relpath}'
+            task_description: str = self._config.logger_cfgs.task_description
+            name: str = f'{exp_name + task_description}-{relpath}'
+            # name: str = f'{exp_name}-{relpath}'
             print('project', project, 'name', name)
             wandb.init(
                 project=project,

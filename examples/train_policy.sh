@@ -2,12 +2,12 @@
 
 # wandb 配置
 source /home/sunyuanxu/miniconda3/etc/profile.d/conda.sh
-conda activate omnisafe
+conda activate new_omnisafe
 export WANDB_API_KEY="07a341b17ceb53dc437556bdf4f18df47002595d"
 
 # 设置环境变量
 export CUDA_VISIBLE_DEVICES=1
-export PYTHONPATH="/home/sunyuanxu/sunyuanxu/FPO-Algorithm:$PYTHONPATH"
+export PYTHONPATH="/home/sunyuanxu/FPO-Algorithm:$PYTHONPATH"
 # 默认参数
 ALGO="FPO"
 ENV_ID="SafetyPointGoal1-v0"
@@ -17,6 +17,9 @@ DEVICE="cuda:0"
 VECTOR_ENV_NUMS=20
 TORCH_THREADS=16
 
+#TASK_DESCRIPTION="{divide_std}_{out_f}_{mask_in_pos_f}_{in_(r-f)/2}"
+TASK_DESCRIPTION="{divide_std}_{out_f}_{mask_in_pos_(r-2*f)/3}_{in_r}"
+# TASK_DESCRIPTION=""
 # cost_limit: 0
 
 # 运行训练脚本
@@ -28,4 +31,6 @@ python train_policy.py \
     --device ${DEVICE} \
     --vector-env-nums ${VECTOR_ENV_NUMS} \
     --torch-threads ${TORCH_THREADS} \
+    --task_description "${TASK_DESCRIPTION}" \
+    --batch-size ${BATCH_SIZE} \
     "$@"

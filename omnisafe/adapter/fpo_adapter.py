@@ -42,6 +42,7 @@ class FPOAdapter(OnPolicyAdapter):
         ):
             #! 这个地方请参考buffer的需求，需要一个改一个的返回值，是feasible function的预测
             act, value_r, value_feasibility, logp = agent.step(obs)
+            assert torch.isnan(act).sum() == 0, 'act contains NaN.'
             
             next_obs, reward, cost, terminated, truncated, info = self.step(act)
 

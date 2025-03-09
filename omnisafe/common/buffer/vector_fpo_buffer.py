@@ -13,12 +13,14 @@ class VectorFPOBuffer(FPOBuffer):
         act_space: OmnisafeSpace,
         size: int,
         gamma: float,
+        cost_gamma: float,
         lam: float,
         lam_c: float,
         advantage_estimator: AdvatageEstimator,
         penalty_coefficient: float,
         standardized_adv_r: bool,
         standardized_adv_c: bool,
+        feasibility_threshold: float,
         num_envs: int = 1,
         device: torch.device = DEVICE_CPU,
     ) -> None:
@@ -26,6 +28,7 @@ class VectorFPOBuffer(FPOBuffer):
         self._num_buffers: int = num_envs
         self._standardized_adv_r: bool = standardized_adv_r
         self._standardized_adv_c: bool = standardized_adv_c
+        self._feasibility_threshold: float = feasibility_threshold
 
         if num_envs < 1:
             raise ValueError('num_envs must be greater than 0.')
@@ -35,6 +38,7 @@ class VectorFPOBuffer(FPOBuffer):
                 act_space=act_space,
                 size=size,
                 gamma=gamma,
+                cost_gamma=cost_gamma,
                 lam=lam,
                 lam_c=lam_c,
                 advantage_estimator=advantage_estimator,
@@ -84,11 +88,26 @@ class VectorFPOBuffer(FPOBuffer):
                 data_pre[k].append(v)
         data = {k: torch.cat(v, dim=0) for k, v in data_pre.items()}
 
-        adv_mean, adv_std, *_ = distributed.dist_statistics_scalar(data['adv_r'])
-        cadv_mean, *_ = distributed.dist_statistics_scalar(data['adv_f'])
+        mask_in_region = data['value_feasibility'] < self._feasibility_threshold
+
+
+
+        in_region_adv_mean, in_region_adv_std, *_ = distributed.dist_statistics_scalar(data['adv_r'][mask_in_region])
+        out_region_adv_mean, out_region_adv_std, *_ = distributed.dist_statistics_scalar(data['adv_r'][~mask_in_region])
+        in_region_cadv_mean, in_region_cadv_std, *_ = distributed.dist_statistics_scalar(data['adv_f'][mask_in_region])
+        out_region_cadv_mean, out_region_cadv_std, *_ = distributed.dist_statistics_scalar(data['adv_f'][~mask_in_region])
         if self._standardized_adv_r:
-            data['adv_r'] = (data['adv_r'] - adv_mean) / (adv_std + 1e-8)
+            data['in_region_standardized_adv_r'] = ((data['adv_r'] - in_region_adv_mean) / (in_region_adv_std + 1e-8)) * mask_in_region
+            data['out_region_standardized_adv_r'] = ((data['adv_r'] - out_region_adv_mean) / (out_region_adv_std + 1e-8)) * ~mask_in_region
+
         if self._standardized_adv_c:
-            data['adv_f'] = data['adv_f'] - cadv_mean
+            data['in_region_standardized_adv_f'] = ((data['adv_f'] - in_region_cadv_mean) / (in_region_cadv_std + 1e-8)) * mask_in_region
+            data['out_region_standardized_adv_f'] = ((data['adv_f'] - out_region_cadv_mean) / (out_region_cadv_std + 1e-8)) * ~mask_in_region
+        
+        data['in_region_cadv_mean'] = in_region_cadv_mean
+        data['in_region_adv_mean'] = in_region_adv_mean
+        data['out_region_cadv_mean'] = out_region_cadv_mean
+        data['out_region_adv_mean'] = out_region_adv_mean
+        data['mask_in_region'] = mask_in_region
 
         return data

@@ -99,8 +99,15 @@ class AlgoWrapper:
                 ), 'off-policy, model-based and offline only support parallel==1!'
 
         cfgs = get_default_kwargs_yaml(self.algo, self.env_id, self.algo_type)
-
+        # import pdb; pdb.set_trace()
+        if self.train_terminal_cfgs and 'task_description' in self.train_terminal_cfgs:
+            if not hasattr(cfgs, 'logger_cfgs'):
+                cfgs.update({'logger_cfgs': {}})
+            
+            cfgs.logger_cfgs.recurisve_update({'task_description': self.train_terminal_cfgs['task_description']})
+            self.train_terminal_cfgs.pop('task_description')
         # update the cfgs from custom configurations
+        # import pdb; pdb.set_trace()
         if self.custom_cfgs:
             # avoid repeatedly record the env_id and algo
             if 'env_id' in self.custom_cfgs:

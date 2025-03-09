@@ -20,7 +20,7 @@ defaults:
     # number of iterations to update the policy
     update_iters: 40
     # batch size for each iteration
-    batch_size: 64
+    batch_size: 500
     # target kl divergence
     target_kl: 0.02
     # entropy coefficient
@@ -44,7 +44,7 @@ defaults:
     # reward discount factor
     gamma: 0.99
     # cost discount factor
-    cost_gamma: 0.99
+    cost_gamma: 0.95
     # lambda for gae
     lam: 0.95
     # lambda for cost gae
@@ -81,6 +81,8 @@ defaults:
     log_dir: "./runs"
     # save model path
     window_lens: 100
+    # task_description
+    task_description: ""
   # model configurations
   model_cfgs:
     # weight initialization mode
