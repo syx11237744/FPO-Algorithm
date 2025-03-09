@@ -6,7 +6,7 @@ conda activate new_omnisafe
 export WANDB_API_KEY="07a341b17ceb53dc437556bdf4f18df47002595d"
 
 # 设置环境变量
-export CUDA_VISIBLE_DEVICES=1
+export CUDA_VISIBLE_DEVICES=0
 export PYTHONPATH="/home/sunyuanxu/FPO-Algorithm:$PYTHONPATH"
 # 默认参数
 ALGO="FPO"
@@ -18,7 +18,7 @@ VECTOR_ENV_NUMS=20
 TORCH_THREADS=16
 
 #TASK_DESCRIPTION="{divide_std}_{out_f}_{mask_in_pos_f}_{in_(r-f)/2}"
-TASK_DESCRIPTION="{divide_std}_{out_f}_{mask_in_pos_(r-2*f)/3}_{in_r}"
+TASK_DESCRIPTION="{divide_std}_{out_f}_{mask_in_pos_(2*r-f)/3}_{in_r}"
 # TASK_DESCRIPTION=""
 # cost_limit: 0
 
