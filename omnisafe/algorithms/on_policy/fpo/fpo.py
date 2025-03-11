@@ -190,6 +190,13 @@ class FPO(PolicyGradient):
 
         # log information about actor
         self._logger.register_key('Loss/Loss_pi', delta=True)
+        # self._logger.register_key('Loss/after_update_Loss_pi', delta=True)
+        # self._logger.register_key('Loss/after_update_out_Loss_pi', delta=False, window_length=1)
+        # self._logger.register_key('Loss/after_update_in_Loss_pi', delta=False, window_length=1)
+        self._logger.register_key('Loss/out_Loss_pi', delta=False)
+        self._logger.register_key('Loss/in_Loss_pi', delta=False)
+        # self._logger.register_key('Train/before_clip_out_ratio*adv', delta=False, window_length=1)
+        # self._logger.register_key('Train/after_update_before_clip_out_ratio*adv', delta=False, window_length=1)
         self._logger.register_key('Value/Adv_r')
         self._logger.register_key('Value/Adv_f')
         self._logger.register_key('Value/out_region_standardized_adv_r')
@@ -230,6 +237,12 @@ class FPO(PolicyGradient):
         self._logger.register_key('Train/in_region_cadv_mean')
         self._logger.register_key('Train/out_region_adv_mean')
         self._logger.register_key('Train/in_region_adv_mean')
+        # self._logger.register_key('Train/out_IS_ratio')
+        # self._logger.register_key('Train/out_adv_f')
+        # self._logger.register_key('Train/out_IS_ratio*out_adv_f')
+        # self._logger.register_key('Train/out_IS_ratio*out_stand_adv_f')
+
+        self._logger.register_key('Train/p_divide_p_')
 
 
         # register environment specific keys
@@ -323,14 +336,18 @@ class FPO(PolicyGradient):
             data['out_region_cadv_mean'],
             data['mask_in_region']
         )
-        self._logger.store({'Train/in_region_adv_mean':in_region_adv_mean})
-        self._logger.store({'Train/out_region_adv_mean':out_region_adv_mean})
-        self._logger.store({'Train/in_region_cadv_mean':in_region_cadv_mean})
-        self._logger.store({'Train/out_region_cadv_mean':out_region_cadv_mean})
-        self._logger.store({'Value/in_region_standardized_adv_r':masked_mean(in_region_standardized_adv_r,mask_in_region)})
-        self._logger.store({'Value/out_region_standardized_adv_r':masked_mean(out_region_standardized_adv_r,~mask_in_region)})
-        self._logger.store({'Value/in_region_standardized_adv_f':masked_mean(in_region_standardized_adv_f,mask_in_region)})
-        self._logger.store({'Value/out_region_standardized_adv_f':masked_mean(out_region_standardized_adv_f,~mask_in_region)})
+        self._logger.store(
+            {
+                'Train/in_region_adv_mean': in_region_adv_mean,
+                'Train/out_region_adv_mean': out_region_adv_mean,
+                'Train/in_region_cadv_mean': in_region_cadv_mean,
+                'Train/out_region_cadv_mean': out_region_cadv_mean,
+                'Value/in_region_standardized_adv_r': masked_mean(in_region_standardized_adv_r, mask_in_region),
+                'Value/out_region_standardized_adv_r': masked_mean(out_region_standardized_adv_r, ~mask_in_region),
+                'Value/in_region_standardized_adv_f': masked_mean(in_region_standardized_adv_f, mask_in_region),
+                'Value/out_region_standardized_adv_f': masked_mean(out_region_standardized_adv_f, ~mask_in_region),
+            },
+        )
 
         original_obs = obs
         old_distribution = self._actor_critic.actor(obs)
@@ -346,6 +363,8 @@ class FPO(PolicyGradient):
 
         update_counts = 0
         final_kl = 0.0
+        logp_ = self._actor_critic.actor.log_prob(act)
+        self._logger.store({'Train/p_divide_p_':torch.exp(logp_ - logp)})
 
         for i in track(range(self._cfgs.algo_cfgs.update_iters), description='Updating...'):
             for (
@@ -497,15 +516,21 @@ class FPO(PolicyGradient):
         logp_ = self._actor_critic.actor.log_prob(act)
         std = self._actor_critic.actor.std
         ratio = torch.exp(logp_ - logp)
-        # lagrangian_multiplier_in_region = self._lagrange_in_region.lagrangian_multiplier.item()
+        lagrangian_multiplier_in_region = self._lagrange_in_region.lagrangian_multiplier.item()
         # lagrangian_multiplier_out_region = self._lagrange_out_region.lagrangian_multiplier.item()
         
         # For in-region samples
         term_in = adv_f * ratio + value_feasibility - self._feasibility_threshold
         mask_in_region_positive = (term_in > 0) & (value_feasibility < self._feasibility_threshold)
 
-        adv = torch.where(~mask_in_region, -out_region_standardized_adv_f, in_region_standardized_adv_r)
-        adv = torch.where(mask_in_region_positive, (2*in_region_standardized_adv_r - in_region_standardized_adv_f)/3, adv)
+        # term_out = adv_f * ratio
+        # mask_out_region_positive = (term_out > 0) & (value_feasibility >= self._feasibility_threshold)
+
+        
+
+        adv = torch.where(~mask_in_region  , -out_region_standardized_adv_f, (in_region_standardized_adv_r-lagrangian_multiplier_in_region)/(1+lagrangian_multiplier_in_region))
+        adv = torch.where(mask_in_region_positive, (-in_region_standardized_adv_f), adv)
+        # adv = torch.where(mask_in_region_positive, -in_region_standardized_adv_f, adv)
         # lagrangian_multiplier_in_region = self._lagrange_in_region.lagrangian_multiplier.item()
         # lagrangian_multiplier_out_region = self._lagrange_out_region.lagrangian_multiplier.item()
         
@@ -527,8 +552,9 @@ class FPO(PolicyGradient):
             1 - self._cfgs.algo_cfgs.clip,
             1 + self._cfgs.algo_cfgs.clip,
         )
+        loss_term = -torch.min(ratio * adv, ratio_cliped * adv)
 
-        loss = -torch.min(ratio * adv, ratio_cliped * adv).mean()
+        loss = loss_term.mean()
         loss -= self._cfgs.algo_cfgs.entropy_coef * distribution.entropy().mean()
         # useful extra info
         entropy = distribution.entropy().mean().item()
@@ -540,6 +566,9 @@ class FPO(PolicyGradient):
                 # 'Train/penalty_out': penalty_out.mean().item(),
                 'Train/PolicyStd': std,
                 'Loss/Loss_pi': loss.mean().item(),
+                'Loss/out_Loss_pi': masked_mean(loss_term,~mask_in_region),
+                'Loss/in_Loss_pi': masked_mean(loss_term,mask_in_region),
+                # 'Train/before_clip_out_ratio*adv': masked_mean(ratio * adv,~mask_in_region)
             },
         )
         return loss
@@ -548,14 +577,23 @@ class FPO(PolicyGradient):
         self,
         data: dict[str, torch.Tensor],
     ) -> tuple[float, float]:
-        obs, logp, adv_f, value_feasibility = (
+        obs, logp, adv_f, act, value_feasibility, out_region_standardized_adv_f, \
+        in_region_standardized_adv_r, in_region_standardized_adv_f = (
             data['obs'],
             data['logp'],
             data['adv_f'],
-            data['value_feasibility']
+            data['act'],
+            data['value_feasibility'],
+            data['out_region_standardized_adv_f'],
+            data['in_region_standardized_adv_r'],
+            data['in_region_standardized_adv_f']
         )
 
-        _, _, value_feasibility_, logp_ = self._actor_critic.step(obs)
+        # _, _, value_feasibility_, logp_ = self._actor_critic.step(obs)
+        # self._actor_critic.actor.log_prob(next_action)
+        with torch.no_grad():
+            value_feasibility_ = self._actor_critic.cost_critic(obs)[0]
+            logp_ = self._actor_critic.actor.log_prob(act)
 
         relu = torch.nn.LeakyReLU()
         ratio = torch.exp(logp_ - logp)
@@ -586,13 +624,39 @@ class FPO(PolicyGradient):
         # 计算过去在out region的但是之后在in region的样本的比例
         out_to_in_ratio = torch.sum(mask_out_region & mask_in_region_) / out_region_count
 
-        self._logger.store({'Train/in_region_ratio': in_region_ratio})
-        self._logger.store({'Train/neg_out_ratio': neg_out_ratio})
-        self._logger.store({'Train/neg_in_ratio': neg_in_ratio})
-        self._logger.store({'Train/in_to_out_ratio': in_to_out_ratio})
-        self._logger.store({'Train/out_to_in_ratio': out_to_in_ratio})
-        self._logger.store({'Train/penalty_term_in': penalty_term_in})
-        self._logger.store({'Train/penalty_term_out': penalty_term_out})
+        # mask_in_region_positive = (term_in > 0) & (value_feasibility < self._feasibility_threshold)
+        
+
+        # adv = torch.where(~mask_in_region , -out_region_standardized_adv_f, in_region_standardized_adv_r)
+        # adv = torch.where(mask_in_region_positive, (-in_region_standardized_adv_f), adv)
+        
+        # ratio_cliped = torch.clamp( 
+        #     ratio,
+        #     1 - self._cfgs.algo_cfgs.clip,
+        #     1 + self._cfgs.algo_cfgs.clip,
+        # )
+        # loss_term = -torch.min(ratio * adv, ratio_cliped * adv)
+        # loss = loss_term.mean()
+
+
+        self._logger.store({
+            'Train/in_region_ratio': in_region_ratio,
+            'Train/neg_out_ratio': neg_out_ratio,
+            'Train/neg_in_ratio': neg_in_ratio,
+            'Train/in_to_out_ratio': in_to_out_ratio,
+            'Train/out_to_in_ratio': out_to_in_ratio,
+            'Train/penalty_term_in': penalty_term_in,
+            'Train/penalty_term_out': penalty_term_out,
+            # 'Train/out_IS_ratio': masked_mean(ratio, ~mask_in_region),
+            # 'Train/out_adv_f': masked_mean(adv_f, ~mask_in_region),
+            # 'Train/out_IS_ratio*out_adv_f': masked_mean(adv_f * ratio, ~mask_in_region),
+            # 'Train/out_IS_ratio*out_stand_adv_f': masked_mean(out_region_standardized_adv_f * ratio, ~mask_in_region),
+            # 'Loss/after_update_Loss_pi': loss.mean().item(),
+            # 'Loss/after_update_out_Loss_pi': masked_mean(loss_term,~mask_in_region),
+            # 'Loss/after_update_in_Loss_pi': masked_mean(loss_term,mask_in_region),
+            # 'Train/after_update_before_clip_out_ratio*adv': masked_mean(ratio * adv,~mask_in_region)
+        })
+
 
         return penalty_term_in, penalty_term_out
 

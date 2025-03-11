@@ -18,7 +18,7 @@ VECTOR_ENV_NUMS=20
 TORCH_THREADS=16
 
 #TASK_DESCRIPTION="{divide_std}_{out_f}_{mask_in_pos_f}_{in_(r-f)/2}"
-TASK_DESCRIPTION="{divide_std}_{out_f}_{mask_in_pos_(2*r-f)/3}_{in_r}"
+TASK_DESCRIPTION="{out_f}_{mask_in_pos_(-f)}_{in_(r-f*lag)/(1+lag)}_bs20000"
 # TASK_DESCRIPTION=""
 # cost_limit: 0
 
