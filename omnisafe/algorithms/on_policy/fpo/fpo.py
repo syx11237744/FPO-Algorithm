@@ -25,6 +25,7 @@ import torch.nn as nn
 from rich.progress import track
 from torch.nn.utils.clip_grad import clip_grad_norm_
 from torch.utils.data import DataLoader, TensorDataset
+import torch.optim as optim
 
 from omnisafe.adapter import FPOAdapter
 from omnisafe.algorithms import registry
@@ -105,6 +106,11 @@ class FPO(PolicyGradient):
         # self._penalty_term_out = self._cfgs.algo_cfgs.init_penalty_term_out
         # self._penalty_term_in = self._cfgs.algo_cfgs.init_penalty_term_in
         self._feasibility_threshold = self._cfgs.algo_cfgs.feasibility_threshold
+
+        self._log_cg = nn.Parameter(torch.tensor([torch.log(torch.tensor(self._cfgs.algo_cfgs.cg_init))], 
+                                                requires_grad=True, 
+                                                device=self._device))
+        self.cg_optimizer = optim.Adam([self._log_cg], lr=self._cfgs.algo_cfgs.cg_lr)
 
     def _init_log(self) -> None:
         """Log info about epoch.
@@ -199,6 +205,7 @@ class FPO(PolicyGradient):
         # self._logger.register_key('Train/after_update_before_clip_out_ratio*adv', delta=False, window_length=1)
         self._logger.register_key('Value/Adv_r')
         self._logger.register_key('Value/Adv_f')
+        self._logger.register_key('Value/cg')
         self._logger.register_key('Value/out_region_standardized_adv_r')
         self._logger.register_key('Value/in_region_standardized_adv_r')
         self._logger.register_key('Value/out_region_standardized_adv_f')
@@ -526,28 +533,16 @@ class FPO(PolicyGradient):
         # term_out = adv_f * ratio
         # mask_out_region_positive = (term_out > 0) & (value_feasibility >= self._feasibility_threshold)
 
-        
+        adv_f = out_region_standardized_adv_f + in_region_standardized_adv_f
 
-        adv = torch.where(~mask_in_region  , -out_region_standardized_adv_f, (in_region_standardized_adv_r-lagrangian_multiplier_in_region)/(1+lagrangian_multiplier_in_region))
-        adv = torch.where(mask_in_region_positive, (-in_region_standardized_adv_f), adv)
+        cri = mask_in_region & (value_feasibility >= self._feasibility_threshold - torch.exp(self._log_cg))
+
+        adv = torch.where(~mask_in_region | mask_in_region_positive, -adv_f, (in_region_standardized_adv_r - lagrangian_multiplier_in_region * adv_f) / (1 + lagrangian_multiplier_in_region))
         # adv = torch.where(mask_in_region_positive, -in_region_standardized_adv_f, adv)
-        # lagrangian_multiplier_in_region = self._lagrange_in_region.lagrangian_multiplier.item()
-        # lagrangian_multiplier_out_region = self._lagrange_out_region.lagrangian_multiplier.item()
+        # 这个地方如何计算adv 还用这个乘子？
+        adv = torch.where(cri, (in_region_standardized_adv_r - lagrangian_multiplier_in_region * adv_f) / (1 + lagrangian_multiplier_in_region), adv)
         
-        # # For in-region samples
-        # term_in = adv_f * ratio + value_feasibility - self._feasibility_threshold
-        # mask_in_region_positive = (term_in > 0) & (value_feasibility < self._feasibility_threshold)
-        # penalty_in = torch.where(mask_in_region_positive, adv_f * lagrangian_multiplier_in_region, torch.zeros_like(term_in))
-
-        # # For out-region samples
-        # term_out = adv_f * ratio
-        # mask_out_region_positive = (term_out > 0) & (value_feasibility >= self._feasibility_threshold)
-        # penalty_out = torch.where(mask_out_region_positive, adv_f * lagrangian_multiplier_out_region, torch.zeros_like(term_out))
-
-        # lagrangian_multiplier_term = mask_in_region_positive * lagrangian_multiplier_in_region + mask_out_region_positive * lagrangian_multiplier_out_region + 1
-        # adv = (adv_r - penalty_in - penalty_out) / lagrangian_multiplier_term
-        
-        ratio_cliped = torch.clamp( 
+        ratio_cliped = torch.clamp(
             ratio,
             1 - self._cfgs.algo_cfgs.clip,
             1 + self._cfgs.algo_cfgs.clip,
@@ -589,13 +584,11 @@ class FPO(PolicyGradient):
             data['in_region_standardized_adv_f']
         )
 
-        # _, _, value_feasibility_, logp_ = self._actor_critic.step(obs)
-        # self._actor_critic.actor.log_prob(next_action)
         with torch.no_grad():
             value_feasibility_ = self._actor_critic.cost_critic(obs)[0]
             logp_ = self._actor_critic.actor.log_prob(act)
 
-        relu = torch.nn.LeakyReLU()
+        leaky_relu = torch.nn.LeakyReLU()
         ratio = torch.exp(logp_ - logp)
 
         mask_in_region = value_feasibility < self._feasibility_threshold
@@ -610,33 +603,35 @@ class FPO(PolicyGradient):
         count_neg_out = torch.sum(torch.logical_and(term_out < 0, mask_out_region)).item()
         out_region_count = torch.sum(mask_out_region).item()
         neg_out_ratio = count_neg_out / out_region_count
+        # import pdb;pdb.set_trace()
 
-        penalty_term_in = torch.where(mask_in_region, relu(term_in), torch.zeros_like(term_in)).mean().item()
-        penalty_term_out = torch.where(mask_out_region, relu(term_out), torch.zeros_like(term_out)).mean().item()
+        #penalty_term_in = torch.where(mask_in_region, leaky_relu(term_in), torch.zeros_like(term_in)).mean().item()
+        penalty_term_in = masked_mean(leaky_relu(term_in),mask_in_region).item()
+        #penalty_term_out = torch.where(mask_out_region, leaky_relu(term_out), torch.zeros_like(term_out)).mean().item()
+        penalty_term_out = masked_mean(leaky_relu(term_out),mask_out_region).item()
 
         in_region_ratio = in_region_count / mask_in_region.shape[0]
 
         mask_in_region_ = value_feasibility_ < self._feasibility_threshold
         mask_out_region_ = ~mask_in_region_
 
-        # 计算过去在in region的但是之后在out region的样本的比例
         in_to_out_ratio = torch.sum(mask_in_region & mask_out_region_) / in_region_count
-        # 计算过去在out region的但是之后在in region的样本的比例
         out_to_in_ratio = torch.sum(mask_out_region & mask_in_region_) / out_region_count
 
-        # mask_in_region_positive = (term_in > 0) & (value_feasibility < self._feasibility_threshold)
-        
+        # update log_cg
+        with torch.no_grad():
+            vio = (mask_in_region * (value_feasibility_ - self._feasibility_threshold)).float()
+            vio_ratio = vio.mean()
 
-        # adv = torch.where(~mask_in_region , -out_region_standardized_adv_f, in_region_standardized_adv_r)
-        # adv = torch.where(mask_in_region_positive, (-in_region_standardized_adv_f), adv)
-        
-        # ratio_cliped = torch.clamp( 
-        #     ratio,
-        #     1 - self._cfgs.algo_cfgs.clip,
-        #     1 + self._cfgs.algo_cfgs.clip,
-        # )
-        # loss_term = -torch.min(ratio * adv, ratio_cliped * adv)
-        # loss = loss_term.mean()
+            delta_cg = masked_mean(leaky_relu((self._feasibility_threshold - value_feasibility_) - self._log_cg.exp()), vio)
+            if in_region_ratio > 0 and vio_ratio == 0:
+                delta_cg += leaky_relu(-self._log_cg.exp())
+
+        log_cg_grad = -delta_cg
+        self._log_cg.grad = log_cg_grad.unsqueeze(0)
+        self.cg_optimizer.step()
+
+
 
 
         self._logger.store({
@@ -647,6 +642,7 @@ class FPO(PolicyGradient):
             'Train/out_to_in_ratio': out_to_in_ratio,
             'Train/penalty_term_in': penalty_term_in,
             'Train/penalty_term_out': penalty_term_out,
+            'Value/cg': self._log_cg.exp().item(),
             # 'Train/out_IS_ratio': masked_mean(ratio, ~mask_in_region),
             # 'Train/out_adv_f': masked_mean(adv_f, ~mask_in_region),
             # 'Train/out_IS_ratio*out_adv_f': masked_mean(adv_f * ratio, ~mask_in_region),

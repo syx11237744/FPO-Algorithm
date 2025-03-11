@@ -130,6 +130,8 @@ class Config(dict):
     penalty_term_out: float
     penalty_term_in: float
     feasibility_threshold: float
+    cg_init: float
+    cg_lr: float
 
     def __init__(self, **kwargs: Any) -> None:
         """Initialize an instance of :class:`Config`."""

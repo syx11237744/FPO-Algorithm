@@ -67,10 +67,14 @@ defaults:
     init_penalty_term_in: 0.001
 
     feasibility_threshold: 0.1
+
+    cg_init: 0.09
+
+    cg_lr: 0.0003
   # logger configurations
   logger_cfgs:
     # use wandb for logging
-    use_wandb: True
+    use_wandb: False
     # wandb project name
     wandb_project: omnisafe
     # use tensorboard for logging
