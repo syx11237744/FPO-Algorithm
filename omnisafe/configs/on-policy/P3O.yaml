@@ -69,7 +69,7 @@ defaults:
     # clip ratio
     clip: 0.2
     # cost limit
-    cost_limit: 25.0
+    cost_limit: 0
     # advantage estimation method, options: gae, retrace
     adv_estimation_method: gae
     # standardize reward advantage
@@ -83,7 +83,7 @@ defaults:
   # logger configurations
   logger_cfgs:
     # use wandb for logging
-    use_wandb: False
+    use_wandb: True
     # wandb project name
     wandb_project: omnisafe
     # use tensorboard for logging

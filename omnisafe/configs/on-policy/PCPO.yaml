@@ -81,13 +81,13 @@ defaults:
     # Subsampled observation
     fvp_obs: None
     # Tolerance of constraint violation
-    cost_limit: 25
+    cost_limit: 0
     # The sub-sampling rate of the observation
     fvp_sample_freq: 1
   # logger configurations
   logger_cfgs:
     # use wandb for logging
-    use_wandb: False
+    use_wandb: True
     # wandb project name
     wandb_project: omnisafe
     # use tensorboard for logging

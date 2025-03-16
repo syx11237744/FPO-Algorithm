@@ -1,6 +1,6 @@
 defaults:
   # seed for random number generator
-  seed: 42
+  seed: 0
   # training configurations
   train_cfgs:
     # device to use for training, options: cpu, cuda, cuda:0, cuda:0,1, etc.
@@ -8,11 +8,11 @@ defaults:
     # number of threads for torch
     torch_threads: 16
     # number of vectorized environments
-    vector_env_nums: 20
+    vector_env_nums: 10
     # number of parallel agent, similar to a3c
     parallel: 1
     # total number of steps to train
-    total_steps: 10000000
+    total_steps: 5000000
   # algorithm configurations
   algo_cfgs:
     # number of steps to update the policy
@@ -68,13 +68,13 @@ defaults:
 
     feasibility_threshold: 0.1
 
-    cg_init: 0.09
+    cg_init: 0.01
 
-    cg_lr: 0.0003
+    cg_lr: 0.003
   # logger configurations
   logger_cfgs:
     # use wandb for logging
-    use_wandb: False
+    use_wandb: True
     # wandb project name
     wandb_project: omnisafe
     # use tensorboard for logging

@@ -75,6 +75,8 @@ class GaussianLearningActor(GaussianActor):
             The normal distribution of the mean and standard deviation from the actor.
         """
         mean = self.mean(obs)
+        if torch.isnan(mean).sum() > 0:
+            import pdb; pdb.set_trace()
         std = torch.exp(self.log_std)
         return Normal(mean, std)
 

@@ -83,7 +83,7 @@ defaults:
   # logger configurations
   logger_cfgs:
     # use wandb for logging
-    use_wandb: False
+    use_wandb: True
     # wandb project name
     wandb_project: omnisafe
     # use tensorboard for logging
@@ -125,7 +125,7 @@ defaults:
   # lagrangian configurations
   lagrange_cfgs:
     # Tolerance of constraint violation
-    cost_limit: 25.0
+    cost_limit: 0.0
     # Initial value of lagrangian multiplier
     lagrangian_multiplier_init: 0.001
     # Learning rate of lagrangian multiplier
