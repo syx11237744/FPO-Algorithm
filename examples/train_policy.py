@@ -78,13 +78,13 @@ if __name__ == '__main__':
         type=str,
         required=True,
     )
-    # parser.add_argument(
-    #     '--seed',
-    #     type=int,
-    #     default=None,
-    #     metavar='SEED',
-    #     help='random seed for training',
-    # )
+    parser.add_argument(
+        '--seed',
+        type=int,
+        default=None,
+        metavar='SEED',
+        help='random seed for training',
+    )
     args, unparsed_args = parser.parse_known_args()
     keys = [k[2:] for k in unparsed_args[0::2]]
     values = list(unparsed_args[1::2])
@@ -97,7 +97,7 @@ if __name__ == '__main__':
     agent = omnisafe.Agent(
         args.algo,
         args.env_id,
-        # seed=args.seed,
+        seed=args.seed,
         train_terminal_cfgs=vars(args),
         custom_cfgs=custom_cfgs,
     )

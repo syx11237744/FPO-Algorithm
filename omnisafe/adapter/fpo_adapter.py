@@ -7,7 +7,6 @@ import torch
 from rich.progress import track
 
 from omnisafe.adapter import OnPolicyAdapter
-from omnisafe.utils.config import Config
 from omnisafe.models.actor_critic import ConstraintActorCritic
 from omnisafe.common.buffer import FPOBuffer
 from omnisafe.common.logger import Logger
@@ -40,27 +39,27 @@ class FPOAdapter(OnPolicyAdapter):
             range(steps_per_epoch),
             description=f'Processing rollout for epoch: {logger.current_epoch}...',
         ):
-            #! 这个地方请参考buffer的需求，需要一个改一个的返回值，是feasible function的预测
-            act, value_r, value_feasibility, logp = agent.step(obs)
-            value_feasibility = torch.clamp(value_feasibility, 0, 1)
-            assert torch.isnan(act).sum() == 0, 'act contains NaN.'
+            act, value_r, value_c, value_rc, logp = agent.step(obs)
+            value_c = torch.clamp(value_c, 0, 1)
+            value_rc = torch.clamp(value_rc, 0, 1)
             
             next_obs, reward, cost, terminated, truncated, info = self.step(act)
 
             self._log_value(reward=reward, cost=cost, info=info)
 
             if self._cfgs.algo_cfgs.use_cost:
-                logger.store({'Value/feasibility': value_feasibility})
+                logger.store({'Value/cost': value_c})
+                logger.store({'Value/recover': value_rc})
             logger.store({'Value/reward': value_r})
-                
+
             buffer.store(
-                # is_cost_one=is_cost_one,
                 obs=obs,
                 act=act,
                 reward=reward,
                 cost=cost,
                 value_r=value_r,
-                value_feasibility=value_feasibility,
+                value_c=value_c,
+                value_rc=value_rc,
                 logp=logp,
             )
 
@@ -77,16 +76,18 @@ class FPOAdapter(OnPolicyAdapter):
             for idx, (done, time_out) in enumerate(zip(terminated, truncated)):
                 if epoch_end or done or time_out:
                     last_value_r = torch.zeros(1)
-                    last_value_feasibility = torch.zeros(1)
+                    last_value_c = torch.zeros(1)
+                    last_value_rc = torch.zeros(1)
                     if not done:
                         if epoch_end:
-                            _, last_value_r, last_value_feasibility, _ = agent.step(obs[idx])
+                            _, last_value_r, last_value_c, last_value_rc, _ = agent.step(obs[idx])
                         if time_out:
-                            _, last_value_r, last_value_feasibility, _ = agent.step(
+                            _, last_value_r, last_value_c, last_value_rc, _ = agent.step(
                                 info['final_observation'][idx],
                             )
                         last_value_r = last_value_r.unsqueeze(0)
-                        last_value_feasibility = last_value_feasibility.unsqueeze(0)
+                        last_value_c = last_value_c.unsqueeze(0)
+                        last_value_rc = last_value_rc.unsqueeze(0)
 
                     if done or time_out:
                         self._log_metrics(logger, idx)
@@ -96,7 +97,7 @@ class FPOAdapter(OnPolicyAdapter):
                         self._ep_cost[idx] = 0.0
                         self._ep_len[idx] = 0.0
 
-                    buffer.finish_path(last_value_r, last_value_feasibility, idx)
+                    buffer.finish_path(last_value_r, last_value_c, last_value_rc, idx)
 
     def _log_value(
         self,

@@ -35,7 +35,7 @@ defaults:
     # number of iterations to update the policy
     update_iters: 40
     # batch size for each iteration
-    batch_size: 512
+    batch_size: 128
     # target kl divergence
     target_kl: 0.02
     # entropy coefficient
@@ -183,8 +183,8 @@ ShadowHandOverSafeFinger:
     max_grad_norm: 1.0
     # use critic norm
     use_critic_norm: False
-    # reward discount factor
-    gamma: 0.96
+    # reward discount fadctor
+    gamma: 0.95
     # normalize observation
     obs_normalize: False
   # model configurations

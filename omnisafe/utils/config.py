@@ -132,6 +132,7 @@ class Config(dict):
     feasibility_threshold: float
     cg_init: float
     cg_lr: float
+    leaky_alpha: float
 
     def __init__(self, **kwargs: Any) -> None:
         """Initialize an instance of :class:`Config`."""

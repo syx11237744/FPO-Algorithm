@@ -39,13 +39,11 @@ class FPOBuffer(OnPolicyBuffer):
             standardized_adv_r=standardized_adv_r,
             standardized_adv_c=standardized_adv_c,
         )
-        self._cost_gamma = cost_gamma
-        self._lam_c = lam_c
         self.cost_one_positions: list[int] = []  # 记录cost=1的轨迹位置
-        self.data['value_feasibility'] = torch.zeros((size,), dtype=torch.float32, device=device)
-        self.data['adv_f'] = torch.zeros((size,), dtype=torch.float32, device=device)
-        self.data['target_value_f'] = torch.zeros((size,), dtype=torch.float32, device=device)
-        self.data['deltas_f'] = torch.zeros((size,), dtype=torch.float32, device=device)
+        self.cost_zero_positions: list[int] = []  # 记录cost=0的轨迹位置
+        self.data['adv_rc'] = torch.zeros((size,), dtype=torch.float32, device=device)
+        self.data['value_rc'] = torch.zeros((size,), dtype=torch.float32, device=device)
+        self.data['target_value_rc'] = torch.zeros((size,), dtype=torch.float32, device=device)
         assert advantage_estimator == "gae", 'FPOBuffer only supports GAE advantage estimator.'
 
     def store(self, **data: torch.Tensor) -> None:
@@ -60,15 +58,17 @@ class FPOBuffer(OnPolicyBuffer):
             data (torch.Tensor): The data to store.
         """
         assert self.ptr < self.max_size, 'No more space in the buffer!'
-        # import pdb
-        # pdb.set_trace()
         for key, value in data.items():
             self.data[key][self.ptr] = value
         cost = data.get('cost', torch.tensor(0)).item()
         assert cost in (0, 1), f'Cost value must be 0 or 1, but got {cost}'
         if cost == 1:
-            self.data['value_feasibility'][self.ptr] = 1
+            self.data['value_c'][self.ptr] = 1
             self.cost_one_positions.append(self.ptr - self.path_start_idx)
+        else:
+            self.data['value_rc'][self.ptr] = 1
+            self.cost_zero_positions.append(self.ptr - self.path_start_idx)
+
         self.ptr += 1
 
     def get(self) -> dict[str, torch.Tensor]:
@@ -77,53 +77,59 @@ class FPOBuffer(OnPolicyBuffer):
         data = {
             'obs': self.data['obs'],
             'act': self.data['act'],
+            'cost': self.data['cost'],
             'target_value_r': self.data['target_value_r'],
             'adv_r': self.data['adv_r'],
             'logp': self.data['logp'],
             'discounted_ret': self.data['discounted_ret'],
-            'adv_f': self.data['adv_f'],
-            'target_value_f': self.data['target_value_f'],
-            'deltas_f': self.data['deltas_f'],
-            'value_feasibility': self.data['value_feasibility'],
+            'adv_c': self.data['adv_c'],
+            'target_value_c': self.data['target_value_c'],
+            'value_c': self.data['value_c'],
+            'adv_rc': self.data['adv_rc'],
+            'target_value_rc': self.data['target_value_rc'],
         }
 
         adv_mean, adv_std, *_ = distributed.dist_statistics_scalar(data['adv_r'])
-        cadv_mean, cadv_std, *_ = distributed.dist_statistics_scalar(data['adv_f'])
+        cadv_mean, cadv_std, *_ = distributed.dist_statistics_scalar(data['adv_c'])
+        rcadv_mean, rcadv_std, *_ = distributed.dist_statistics_scalar(data['adv_rc'])
         if self._standardized_adv_r:
             data['adv_r'] = (data['adv_r'] - adv_mean) / (adv_std + 1e-8)
         if self._standardized_adv_c:
-            data['standardized_adv_f'] = (data['adv_f'] - cadv_mean) / (cadv_std + 1e-8)
-        
-        data['cadv_mean'] = cadv_mean.unsqueeze(0)
-        return data
+            data['standardized_adv_c'] = (data['adv_c'] - cadv_mean) / (cadv_std + 1e-8)
+            data['adv_rc'] = (data['adv_rc'] - rcadv_mean) / (rcadv_std + 1e-8)
 
+        return data
 
     def finish_path(
         self,
         last_value_r: torch.Tensor | None = None,
-        last_value_feasibility: torch.Tensor | None = None,
+        last_value_c: torch.Tensor | None = None,
+        last_value_rc: torch.Tensor | None = None,
     ) -> None:
         """
         在原有的finish path的基础上，我们需要修改cost的advantage的计算方式
         """
         if last_value_r is None:
             last_value_r = torch.zeros(1, device=self._device)
-        if last_value_feasibility is None:
-            last_value_feasibility = torch.zeros(1, device=self._device)
+        if last_value_c is None:
+            last_value_c = torch.zeros(1, device=self._device)
+        if last_value_rc is None:
+            last_value_rc = torch.zeros(1, device=self._device)
 
         path_slice = slice(self.path_start_idx, self.ptr)
         path_length = self.ptr - self.path_start_idx
         last_value_r = last_value_r.to(self._device)
-        last_value_feasibility = last_value_feasibility.to(self._device)
+        last_value_c = last_value_c.to(self._device)
+        last_value_rc = last_value_rc.to(self._device)
         
         rewards = torch.cat([self.data['reward'][path_slice], last_value_r])
         values_r = torch.cat([self.data['value_r'][path_slice], last_value_r])
-        costs = torch.cat([self.data['cost'][path_slice], last_value_feasibility])
-        value_feasibility = torch.cat([self.data['value_feasibility'][path_slice], last_value_feasibility])
+        costs = torch.cat([self.data['cost'][path_slice], last_value_c])
+        values_c = torch.cat([self.data['value_c'][path_slice], last_value_c])
+        values_rc = torch.cat([self.data['value_rc'][path_slice], last_value_rc])
 
         discountred_ret = discount_cumsum(rewards, self._gamma)[:-1]
         self.data['discounted_ret'][path_slice] = discountred_ret
-        # penalties = torch.cat([costs,last_value_feasibility])
         rewards -= self._penalty_coefficient * costs
 
         adv_r, target_value_r = self._calculate_adv_and_value_targets(
@@ -134,33 +140,50 @@ class FPOBuffer(OnPolicyBuffer):
 
         #! 想一下cost=1在最后一个位置会怎么样,应该不会怎么样，因为连乘的是乘到倒数第二个位置上的，所以不用担心？
         if len(self.cost_one_positions) == 0:
-            adv_f, target_value_f, deltas_f = self._calculate_feasibility_advantage(
+            adv_c, target_value_c = self._calculate_feasibility_advantage(
                 costs=costs,
-                value_feasibility=value_feasibility,
+                values=values_c,
                 lam=self._lam_c,
             )
         else:
-            adv_f, target_value_f, deltas_f = self._process_segments(
+            adv_c, target_value_c = self._process_segments(
                 path_length=path_length,
                 costs=costs,
-                value_feasibility=value_feasibility,
+                values=values_c,
+                segment_positions=self.cost_one_positions,
+            )
+
+        if len(self.cost_zero_positions) == 0:
+            adv_rc, target_value_rc = self._calculate_feasibility_advantage(
+                costs=1 - costs,
+                values=values_rc,
+                lam=self._lam_c,
+            )
+        else:
+            adv_rc, target_value_rc = self._process_segments(
+                path_length=path_length,
+                costs=1 - costs,
+                values=values_rc,
+                segment_positions=self.cost_zero_positions,
             )
 
         self.data['adv_r'][path_slice] = adv_r
         self.data['target_value_r'][path_slice] = target_value_r
-        self.data['adv_f'][path_slice] = adv_f
-        self.data['target_value_f'][path_slice] = target_value_f
-        self.data['deltas_f'][path_slice] = deltas_f
-        
+        self.data['adv_c'][path_slice] = adv_c
+        self.data['target_value_c'][path_slice] = target_value_c
+        self.data['adv_rc'][path_slice] = adv_rc
+        self.data['target_value_rc'][path_slice] = target_value_rc
 
         self.path_start_idx = self.ptr
         self.cost_one_positions = []
+        self.cost_zero_positions = []
     
     def _process_segments(
         self,
         path_length: int,
         costs: torch.Tensor,
-        value_feasibility: torch.Tensor,
+        values: torch.Tensor,
+        segment_positions: list,
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """
         Process path segments separated by cost=1 positions.
@@ -176,13 +199,12 @@ class FPOBuffer(OnPolicyBuffer):
         # Initialize tensors
         adv_f = torch.zeros(path_length, device=self._device)
         target_value_f = torch.zeros(path_length, device=self._device)
-        deltas_f = torch.zeros(path_length, device=self._device)
         
         # Create segment boundaries
-        cost_one_tensor = torch.tensor(self.cost_one_positions, device=self._device)
+        segment_positions_tensor = torch.tensor(segment_positions, device=self._device)
         segments = torch.cat([
             torch.tensor([0], device=self._device),
-            cost_one_tensor + 1,
+            segment_positions_tensor + 1,
             torch.tensor([path_length], device=self._device)
         ])
         
@@ -191,35 +213,29 @@ class FPOBuffer(OnPolicyBuffer):
             #! 需要对最后一个cost可能=1的情况进行特殊判断，不然会出现数据丢失的问题
             # 对于这种情况的话，start == end == path_length，那么我们给start - 1
             if start >= end:
-                # if start == path_length and start > 0:
-                #     # 处理最后一个位置的cost=1情况
-                #     start = start - 1
-                # else:
                 continue
-                
+
             # Create masks for the current segment
             path_slice = slice(start, end)
             value_slice = slice(start, end + 1)
             
             # Calculate advantages for the segment
-            segment_adv, segment_target, segment_deltas = self._calculate_feasibility_advantage(
+            segment_adv, segment_target = self._calculate_feasibility_advantage(
                 costs=costs[value_slice],
-                value_feasibility=value_feasibility[value_slice],
+                values=values[value_slice],
                 lam=self._lam_c,
             )
             
             # Update results
             adv_f[path_slice] = segment_adv
             target_value_f[path_slice] = segment_target
-            deltas_f[path_slice] = segment_deltas
         
-        return adv_f, target_value_f, deltas_f
-
+        return adv_f, target_value_f
 
     def _calculate_feasibility_advantage(
         self,
         costs: torch.Tensor,           # c(s)
-        value_feasibility: torch.Tensor,    # F^π(s)
+        values: torch.Tensor,    # F^π(s)
         # next_value_feasibility: torch.Tensor,  # F^π(s') value_feasibility[1:]
         lam: float,
     ) -> tuple[torch.Tensor, torch.Tensor]:
@@ -235,17 +251,17 @@ class FPOBuffer(OnPolicyBuffer):
         # 计算类似TD误差的值
         deltas = (
             costs[:-1] +  # c(s)
-            (1 - costs[:-1]) * self._cost_gamma * value_feasibility[1:] -  # (1-c(s))γF^π(s')
-            value_feasibility[:-1]  # -F^π(s)
+            (1 - costs[:-1]) * self._cost_gamma * values[1:] -  # (1-c(s))γF^π(s')
+            values[:-1]  # -F^π(s)
         )
         
         # 使用GAE方式计算优势
         advantages = discount_cumsum(deltas, self._cost_gamma * lam).to(torch.float32)
         
         # clip <= 1
-        feasibility_targets = torch.clamp(advantages + value_feasibility[:-1], 0, 1)
+        feasibility_targets = torch.clamp(advantages + values[:-1], 0, 1)
         
-        return advantages, feasibility_targets, deltas
+        return advantages, feasibility_targets
 
 
 

@@ -19,15 +19,15 @@ defaults:
   # training configurations
   train_cfgs:
     # device to use for training, options: cpu, cuda, cuda:0, cuda:0,1, etc.
-    device: cpu
+    device: cuda:0
     # number of threads for torch
     torch_threads: 16
     # number of vectorized environments
-    vector_env_nums: 20
+    vector_env_nums: 10
     # number of parallel agent, similar to a3c
     parallel: 1
     # total number of steps to train
-    total_steps: 10000000
+    total_steps: 5000000
   # algorithm configurations
   algo_cfgs:
     # number of steps to update the policy
@@ -35,7 +35,7 @@ defaults:
     # number of iterations to update the policy
     update_iters: 40
     # batch size for each iteration
-    batch_size: 512
+    batch_size: 20000
     # target kl divergence
     target_kl: 0.02
     # entropy coefficient
@@ -83,7 +83,7 @@ defaults:
     # wandb project name
     wandb_project: omnisafe
     # use tensorboard for logging
-    use_tensorboard: True
+    use_tensorboard: False
     # save model frequency
     save_model_freq: 100
     # save logger path

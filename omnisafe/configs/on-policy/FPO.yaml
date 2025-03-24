@@ -38,7 +38,7 @@ defaults:
     # max gradient norm
     max_grad_norm: 40.0
     # use critic norm
-    use_critic_norm: False
+    use_critic_norm: True
     # critic norm coefficient
     critic_norm_coef: 0.001
     # reward discount factor
@@ -71,6 +71,8 @@ defaults:
     cg_init: 0.01
 
     cg_lr: 0.003
+
+    leaky_alpha: 0.001
   # logger configurations
   logger_cfgs:
     # use wandb for logging
