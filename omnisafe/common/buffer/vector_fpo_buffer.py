@@ -98,75 +98,44 @@ class VectorFPOBuffer(FPOBuffer):
         out_region_cadv_mean, out_region_cadv_std = compute_region_statistics(data['adv_c'], mask_out_region)
         rcadv_mean, rcadv_std, *_ = distributed.dist_statistics_scalar(data['adv_rc'])
 
-        # adv_mean, adv_std = compute_region_statistics(data['adv_r'], torch.ones_like(mask_in_region))
-        # cadv_mean, cadv_std = compute_region_statistics(data['adv_f'], torch.ones_like(mask_in_region))
+        adv_mean, adv_std = compute_region_statistics(data['adv_r'], torch.ones_like(mask_in_region))
+        cadv_mean, cadv_std = compute_region_statistics(data['adv_c'], torch.ones_like(mask_in_region))
 
         if self._standardized_adv_r:
-            # data['standardized_adv_r'] = standardize_adv(
-            #     data['adv_r'], adv_mean, adv_std, torch.ones_like(mask_in_region)
+            data['standardized_adv_r'] = standardize_adv(
+                data['adv_r'], adv_mean, adv_std, torch.ones_like(mask_in_region)
+            )
+            data['in_region_standardized_adv_r'] = data['standardized_adv_r'] * mask_in_region
+            data['out_region_standardized_adv_r'] = data['standardized_adv_r'] * mask_out_region
+            # data['in_region_standardized_adv_r'] = standardize_adv(
+            #     data['adv_r'], in_region_adv_mean, in_region_adv_std, mask_in_region
             # )
-            # data['in_region_standardized_adv_r'] = data['standardized_adv_r'] * mask_in_region
-            # data['out_region_standardized_adv_r'] = data['standardized_adv_r'] * mask_out_region
-            data['in_region_standardized_adv_r'] = standardize_adv(
-                data['adv_r'], in_region_adv_mean, in_region_adv_std, mask_in_region
-            )
-            data['out_region_standardized_adv_r'] = standardize_adv(
-                data['adv_r'], out_region_adv_mean, out_region_adv_std, mask_out_region
-            )
+            # data['out_region_standardized_adv_r'] = standardize_adv(
+            #     data['adv_r'], out_region_adv_mean, out_region_adv_std, mask_out_region
+            # )
 
         if self._standardized_adv_c:
-            # data['standardized_adv_f'] = standardize_adv(
-            #     data['adv_f'], cadv_mean, cadv_std, torch.ones_like(mask_in_region)
+            data['standardized_adv_c'] = standardize_adv(
+                data['adv_c'], cadv_mean, cadv_std, torch.ones_like(mask_in_region)
+            )
+            data['in_region_standardized_adv_c'] = data['standardized_adv_c'] * mask_in_region
+            data['out_region_standardized_adv_c'] = data['standardized_adv_c'] * mask_out_region
+            # data['in_region_standardized_adv_c'] = standardize_adv(
+            #     data['adv_c'], in_region_cadv_mean, in_region_cadv_std, mask_in_region
             # )
-            # data['in_region_standardized_adv_f'] = data['standardized_adv_f'] * mask_in_region
-            # data['out_region_standardized_adv_f'] = data['standardized_adv_f'] * mask_out_region
-            data['in_region_standardized_adv_c'] = standardize_adv(
-                data['adv_c'], in_region_cadv_mean, in_region_cadv_std, mask_in_region
-            )
-            data['out_region_standardized_adv_c'] = standardize_adv(
-                data['adv_c'], out_region_cadv_mean, out_region_cadv_std, mask_out_region
-            )
+            # data['out_region_standardized_adv_c'] = standardize_adv(
+            #     data['adv_c'], out_region_cadv_mean, out_region_cadv_std, mask_out_region
+            # )
             data['adv_rc'] = (data['adv_rc'] - rcadv_mean) / (rcadv_std + 1e-8)
 
-        # if any(mask_in_region):
-        #     # in_region_adv_mean, in_region_adv_std, *_ = distributed.dist_statistics_scalar(data['adv_r'][mask_in_region])
-        #     in_region_adv_mean, in_region_adv_std = torch.mean(data['adv_r'][mask_in_region]), torch.std(data['adv_r'][mask_in_region])
-        #     # in_region_cadv_mean, in_region_cadv_std, *_ = distributed.dist_statistics_scalar(data['adv_f'][mask_in_region])
-        #     in_region_cadv_mean, in_region_cadv_std = torch.mean(data['adv_f'][mask_in_region]), torch.std(data['adv_f'][mask_in_region])
-        # else:
-        #     in_region_adv_mean = 0
-        #     in_region_adv_std = 0
-        #     in_region_cadv_mean = 0
-        #     in_region_cadv_std = 0
-        
-        # if any(~mask_in_region):
-        #     # out_region_adv_mean, out_region_adv_std, *_ = distributed.dist_statistics_scalar(data['adv_r'][~mask_in_region])
-        #     out_region_adv_mean, out_region_adv_std = torch.mean(data['adv_r'][~mask_in_region]), torch.std(data['adv_r'][~mask_in_region])
-        #     # out_region_cadv_mean, out_region_cadv_std, *_ = distributed.dist_statistics_scalar(data['adv_f'][~mask_in_region])
-        #     out_region_cadv_mean, out_region_cadv_std = torch.mean(data['adv_f'][~mask_in_region]), torch.std(data['adv_f'][~mask_in_region])
-        # else:
-        #     out_region_adv_mean = 0
-        #     out_region_adv_std = 0
-        #     out_region_cadv_mean = 0
-        #     out_region_cadv_std = 0
-
-        # if self._standardized_adv_r:
-        #     data['in_region_standardized_adv_r'] = ((data['adv_r'] - in_region_adv_mean) / (in_region_adv_std + 1e-8)) * mask_in_region
-        #     data['out_region_standardized_adv_r'] = ((data['adv_r'] - out_region_adv_mean) / (out_region_adv_std + 1e-8)) * ~mask_in_region
-
-        # if self._standardized_adv_c:
-        #     data['in_region_standardized_adv_f'] = ((data['adv_f'] - in_region_cadv_mean) / (in_region_cadv_std + 1e-8)) * mask_in_region
-        #     data['out_region_standardized_adv_f'] = ((data['adv_f'] - out_region_cadv_mean) / (out_region_cadv_std + 1e-8)) * ~mask_in_region
-        
-        # if any(~mask_in_region):
-        #     data['out_region_standardized_adv_f'] = torch.zeros_like(data['out_region_standardized_adv_f'])
-        #     data['out_region_standardized_adv_r'] = torch.zeros_like(data['out_region_standardized_adv_r'])
         
         data['in_region_cadv_mean'] = in_region_cadv_mean
         data['in_region_adv_mean'] = in_region_adv_mean
         data['out_region_cadv_mean'] = out_region_cadv_mean
         data['out_region_adv_mean'] = out_region_adv_mean
         data['mask_in_region'] = mask_in_region
+        data['adv_mean'] = adv_mean
+        data['cadv_mean'] = cadv_mean
 
         return data
 

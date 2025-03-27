@@ -21,8 +21,8 @@ ALGO="FPO"
 # ENV_ID="SafetyPointGoal1-v0"
 # ENV_ID="SafetyPointPush1-v0"
 # ENV_ID="SafetyPointButton1-v0"
-ENV_ID="SafetyCarCircle1-v0" ## low_r
-# ENV_ID="SafetyCarPush1-v0" ## low_r
+# ENV_ID="SafetyCarCircle1-v0" ## low_r
+ENV_ID="SafetyCarPush1-v0" ## low_r
 # ENV_ID="SafetyCarGoal1-v0"
 # ENV_ID="SafetyCarButton1-v0" ## 
 # ENV_ID="SafetyHalfCheetahVelocity-v1" ## low_r
@@ -38,7 +38,7 @@ DEVICE="cuda:0"
 VECTOR_ENV_NUMS=20
 TORCH_THREADS=16
 SEED=0
-TASK_DESCRIPTION="{bs20000}_{negative_slope=0.01}_{recover}"
+TASK_DESCRIPTION="{bs20000}_{negative_slope=0.001}_{rc}_{merge}_{1-weight}_{no_abs}_{adv_stand}"
 # TASK_DESCRIPTION="{divide_stand}_{out_in_pos_f)}_{in_r-f}_{bs20000}_{negative_slope=0.001}"
 # TASK_DESCRIPTION="{out|in_pos_f}_{in_(r-f*lag)/(1+lag)}_{adv_f>0}_{negative_slope=0.001}_{250ep}"
 # cost_limit: 0

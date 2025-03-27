@@ -280,6 +280,8 @@ class FPO(PolicyGradient):
         self._logger.register_key('Train/in_region_adv_mean')
         self._logger.register_key('Train/grad_norm')
         self._logger.register_key('Train/actor_mean')
+
+        self._logger.register_key('Train/weight')
         # self._logger.register_key('Train/target_cg')
         # self._logger.register_key('Train/out_IS_ratio')
         # self._logger.register_key('Train/out_adv_c')
@@ -461,8 +463,9 @@ class FPO(PolicyGradient):
         self._logger.store(
             {
                 'Train/StopIter': update_counts,  # pylint: disable=undefined-loop-variable
-                'Value/Adv_r': adv_r.abs().mean().item(),
-                'Value/Adv_c': adv_c.abs().mean().item(),
+                'Value/Adv_r': adv_r.mean().item(),
+                'Value/Adv_c': adv_c.mean().item(),
+                'Value/Adv_rc': adv_rc.mean().item(),
                 'Train/KL': final_kl,
             },
         )
@@ -592,7 +595,11 @@ class FPO(PolicyGradient):
         # 这个地方如何计算adv 还用这个乘子？
         # adv = torch.where(cri, (in_region_standardized_adv_r - lagrangian_multiplier_in_region * adv_c) / (1 + lagrangian_multiplier_in_region), adv)
         # adv = torch.where(~mask_in_region | mask_in_region_positive, -adv_c, (adv_r - lagrangian_multiplier_in_region * adv_c) / (1 + lagrangian_multiplier_in_region))
-        adv = torch.where(~mask_in_region|mask_in_region_positive, -adv_c, (adv_r - lagrangian_multiplier_in_region * adv_c) / (1 + lagrangian_multiplier_in_region))
+        # adv = torch.where(~mask_in_region|mask_in_region_positive, -adv_c, (adv_r - lagrangian_multiplier_in_region * adv_c) / (1 + lagrangian_multiplier_in_region))
+        weight = torch.clamp((1 - (value_c) / self._feasibility_threshold), 0, 1) ** lagrangian_multiplier_in_region
+
+        adv = torch.where(~mask_in_region, -adv_c, ((weight) * adv_r - (1 - weight) * adv_c))
+        # adv = torch.where(~mask_in_region, -adv_c, (adv_r - weight * adv_c) / (1 + weight))
         # adv = torch.where(~mask_in_region, -adv_c, adv_r)
         # adv = torch.where(~mask_in_region, (adv_r - lagrangian_multiplier_out_region * adv_c) / (1 + lagrangian_multiplier_out_region), adv_r)
         
@@ -604,6 +611,8 @@ class FPO(PolicyGradient):
         # )
 
         adv = torch.where(cost > 0, adv_rc, adv)
+        # standized adv
+        adv = (adv - adv.mean()) / (adv.std() + 1e-8)
 
         ratio_cliped = torch.clamp(
             ratio,
@@ -623,6 +632,7 @@ class FPO(PolicyGradient):
                 # 'Train/penalty_in': penalty_in.mean().item(),
                 # 'Train/penalty_out': penalty_out.mean().item(),
                 'Train/PolicyStd': std,
+                'Train/weight': weight,
                 'Loss/Loss_pi': loss.mean().item(),
                 'Loss/out_Loss_pi': masked_mean(loss_term,~mask_in_region),
                 'Loss/in_Loss_pi': masked_mean(loss_term,mask_in_region),
@@ -691,9 +701,11 @@ class FPO(PolicyGradient):
 
         #penalty_term_in = torch.where(mask_in_region, leaky_relu(term_in), torch.zeros_like(term_in)).mean().item()
         # penalty_term_in = masked_mean(leaky_relu(term_in),mask_in_region & (value_c > self._feasibility_threshold - self._log_cg.exp())).item()
-        penalty_term_in = masked_mean(leaky_relu(term_in),mask_in_region & (adv_c > 0)).item()
+        penalty_term_in = masked_mean(leaky_relu(term_in),mask_in_region).item()
+        # penalty_term_in = leaky_relu(masked_mean(term_in,mask_in_region)).item()
         #penalty_term_out = torch.where(mask_out_region, leaky_relu(term_out), torch.zeros_like(term_out)).mean().item()
         penalty_term_out = masked_mean(leaky_relu(term_out),mask_out_region).item()
+        # penalty_term_out = leaky_relu(masked_mean(term_out,mask_out_region)).item()
 
 
 
