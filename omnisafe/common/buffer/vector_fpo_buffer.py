@@ -1,10 +1,9 @@
-
 import torch
-from typing import Dict, List, Optional, Tuple, Union
+from typing import Dict, Optional
 
 from omnisafe.common.buffer import FPOBuffer
 from omnisafe.typing import DEVICE_CPU, AdvatageEstimator, OmnisafeSpace
-from omnisafe.utils import distributed
+
 
 class VectorFPOBuffer(FPOBuffer):
     def __init__(  # pylint: disable=super-init-not-called,too-many-arguments
@@ -90,65 +89,26 @@ class VectorFPOBuffer(FPOBuffer):
         data = {k: torch.cat(v, dim=0) for k, v in data_pre.items()}
 
         mask_in_region = data['value_c'] < self._feasibility_threshold
-        mask_out_region = ~mask_in_region
 
-        in_region_adv_mean, in_region_adv_std = compute_region_statistics(data['adv_r'], mask_in_region)
-        in_region_cadv_mean, in_region_cadv_std = compute_region_statistics(data['adv_c'], mask_in_region)
-        out_region_adv_mean, out_region_adv_std = compute_region_statistics(data['adv_r'], mask_out_region)
-        out_region_cadv_mean, out_region_cadv_std = compute_region_statistics(data['adv_c'], mask_out_region)
-        rcadv_mean, rcadv_std, *_ = distributed.dist_statistics_scalar(data['adv_rc'])
-
-        adv_mean, adv_std = compute_region_statistics(data['adv_r'], torch.ones_like(mask_in_region))
-        cadv_mean, cadv_std = compute_region_statistics(data['adv_c'], torch.ones_like(mask_in_region))
+        adv_mean, adv_std = compute_statistics(data['adv_r'])
+        cadv_mean, cadv_std = compute_statistics(data['adv_c'])
+        rcadv_mean, rcadv_std = compute_statistics(data['adv_rc'])
 
         if self._standardized_adv_r:
-            data['standardized_adv_r'] = standardize_adv(
-                data['adv_r'], adv_mean, adv_std, torch.ones_like(mask_in_region)
-            )
-            data['in_region_standardized_adv_r'] = data['standardized_adv_r'] * mask_in_region
-            data['out_region_standardized_adv_r'] = data['standardized_adv_r'] * mask_out_region
-            # data['in_region_standardized_adv_r'] = standardize_adv(
-            #     data['adv_r'], in_region_adv_mean, in_region_adv_std, mask_in_region
-            # )
-            # data['out_region_standardized_adv_r'] = standardize_adv(
-            #     data['adv_r'], out_region_adv_mean, out_region_adv_std, mask_out_region
-            # )
-
+            data['adv_r'] = standardize_adv(data['adv_r'], adv_mean, adv_std)
         if self._standardized_adv_c:
-            data['standardized_adv_c'] = standardize_adv(
-                data['adv_c'], cadv_mean, cadv_std, torch.ones_like(mask_in_region)
-            )
-            data['in_region_standardized_adv_c'] = data['standardized_adv_c'] * mask_in_region
-            data['out_region_standardized_adv_c'] = data['standardized_adv_c'] * mask_out_region
-            # data['in_region_standardized_adv_c'] = standardize_adv(
-            #     data['adv_c'], in_region_cadv_mean, in_region_cadv_std, mask_in_region
-            # )
-            # data['out_region_standardized_adv_c'] = standardize_adv(
-            #     data['adv_c'], out_region_cadv_mean, out_region_cadv_std, mask_out_region
-            # )
-            data['adv_rc'] = (data['adv_rc'] - rcadv_mean) / (rcadv_std + 1e-8)
+            data['unstandardized_adv_c'] = data['adv_c']
+            data['adv_c'] = standardize_adv(data['adv_c'], cadv_mean, cadv_std)
+            data['adv_rc'] = standardize_adv(data['adv_rc'], rcadv_mean, rcadv_std)
 
-        
-        data['in_region_cadv_mean'] = in_region_cadv_mean
-        data['in_region_adv_mean'] = in_region_adv_mean
-        data['out_region_cadv_mean'] = out_region_cadv_mean
-        data['out_region_adv_mean'] = out_region_adv_mean
         data['mask_in_region'] = mask_in_region
-        data['adv_mean'] = adv_mean
-        data['cadv_mean'] = cadv_mean
 
         return data
 
-def compute_region_statistics(data_tensor, mask):
-    if torch.any(mask):
-        selected_data = data_tensor[mask]
-        mean = torch.mean(selected_data)
-        if selected_data.numel() > 1:  # 只有1个元素时，std设为0
-            std = torch.std(selected_data)
-        else:
-            std = torch.std(selected_data, unbiased=False)
-        return mean, std
-    return 0.0, 0.0
 
-def standardize_adv(adv, mean, std, mask):
-    return ((adv - mean) / (std + 1e-8)) * mask
+def compute_statistics(data):
+    return torch.mean(data), torch.std(data)
+
+
+def standardize_adv(adv, mean, std):
+    return ((adv - mean) / (std + 1e-8))
