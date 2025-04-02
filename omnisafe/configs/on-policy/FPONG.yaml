@@ -51,8 +51,6 @@ defaults:
     lam_c: 0.95
     # clip ratio
     clip: 0.2
-    # clip high ratio
-    clip_high: 0.3
     # advantage estimation method, options: gae, retrace
     adv_estimation_method: gae
     # standardize reward advantage
@@ -64,17 +62,34 @@ defaults:
     # use cost 
     use_cost: True
 
+    init_penalty_term_out: 0.001
+
+    init_penalty_term_in: 0.001
+
     feasibility_threshold: 0.1
 
+    cg_init: 0.01
+
+    cg_lr: 0.003
+
     leaky_alpha: 0.001
+
+    # Damping value for conjugate gradient
+    cg_damping: 0.1
+    # Number of conjugate gradient iterations
+    cg_iters: 15
+    # Subsampled observation
+    fvp_obs: None
+    # The sub-sampling rate of the observation
+    fvp_sample_freq: 1
   # logger configurations
   logger_cfgs:
     # use wandb for logging
-    use_wandb: False
+    use_wandb: True
     # wandb project name
     wandb_project: omnisafe
     # use tensorboard for logging
-    use_tensorboard: True
+    use_tensorboard: False
     # save model frequency
     save_model_freq: 100
     # save logger path
@@ -111,15 +126,8 @@ defaults:
       activation: tanh
       # learning rate
       lr: 0.0003
-    multiplier:
-      # hidden layer sizes
-      hidden_sizes: [16, 16]
-      # activation function
-      activation: tanh
-      # learning rate
-      lr: 0.003
-  # in region lagrangian configurations
-  in_region_lagrange_cfgs:
+  # lagrangian configurations
+  lagrange_cfgs:
     # Tolerance of constraint violation
     cost_limit: 0
     # Initial value of lagrangian multiplier
@@ -128,47 +136,5 @@ defaults:
     lambda_lr: 0.035
     # Type of lagrangian optimizer
     lambda_optimizer: "Adam"
-  # out region lagrangian configurations
-  out_region_lagrange_cfgs:
-    # Tolerance of constraint violation
-    cost_limit: 0
-    # Initial value of lagrangian multiplier
-    lagrangian_multiplier_init: 0.001
-    # Learning rate of lagrangian multiplier
-    lambda_lr: 0.1
-    # Type of lagrangian optimizer
-    lambda_optimizer: "Adam"
-  pid_lagrange_cfgs:
-    # The Kp of PID controller
-    pid_kp: 0.1
-    # The Ki of PID controller
-    pid_ki: 0.01
-    # The Kd of PID controller
-    pid_kd: 0.01
-    #The delay of PID controller
-    pid_d_delay: 10
-    # The exponential moving average alpha of the proportional term of the PID controller.
-    pid_delta_p_ema_alpha: 0.95
-    # The exponential moving average alpha of the derivative term of the PID controller.
-    pid_delta_d_ema_alpha: 0.95
-    # Whether to normalize the sum of the cost.
-    sum_norm: True
-    # Whether to normalize the derivate of the cost.
-    diff_norm: False
-    # Tolerance of constraint violation
-    cost_limit: 0
-    # The max penalty coefficient
-    penalty_max: 1.0
-    # Initial value of lagrangian multiplier
-    lagrangian_multiplier_init: 0.001
-  statewise_lagrange_cfgs:
-    # The Kp of PID controller
-    pid_kp: 0.3
-    # The Ki of PID controller
-    pid_ki: 0.01
-    # The Kd of PID controller
-    pid_kd: 0.01
-    # The exponential moving average alpha
-    ema_alpha: 0.0
-
+  # environment specific configurations
   env_cfgs: {}

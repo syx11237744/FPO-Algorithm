@@ -127,12 +127,9 @@ class Config(dict):
     normalized_obs: bool
     max_len: int
     num_threads: int
-    penalty_term_out: float
-    penalty_term_in: float
     feasibility_threshold: float
-    cg_init: float
-    cg_lr: float
     leaky_alpha: float
+    clip_high: float
 
     def __init__(self, **kwargs: Any) -> None:
         """Initialize an instance of :class:`Config`."""
@@ -231,6 +228,7 @@ class ModelConfig(Config):
     actor_type: ActorType
     actor: ModelConfig
     critic: ModelConfig
+    multiplier: ModelConfig
     hidden_sizes: list[int]
     activation: Activation
     std: list[float]

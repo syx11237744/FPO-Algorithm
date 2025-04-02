@@ -16,31 +16,37 @@ export PYTHONPATH="/home/sunyuanxu/FPO-Algorithm:$PYTHONPATH"
 # ALGO="TRPOPID"
 # ALGO="PCPO"
 ALGO="FPO"
+# ALGO="FPONG"
 
 # ENV_ID="SafetyPointCircle1-v0"
 # ENV_ID="SafetyPointGoal1-v0"
-# ENV_ID="SafetyPointPush1-v0"
+# ENV_ID="SafetyPointPush1-v0" ## low_r
 # ENV_ID="SafetyPointButton1-v0"
-# ENV_ID="SafetyCarCircle1-v0" ## low_r
-ENV_ID="SafetyCarPush1-v0" ## low_r
+# ENV_ID="SafetyCarCircle1-v0" ## 
+ENV_ID="SafetyCarPush1-v0" ## 
 # ENV_ID="SafetyCarGoal1-v0"
-# ENV_ID="SafetyCarButton1-v0" ## 
+# ENV_ID="SafetyCarButton1-v0" ## low_r
 # ENV_ID="SafetyHalfCheetahVelocity-v1" ## low_r
 # ENV_ID="SafetySwimmerVelocity-v1" 
 # ENV_ID="SafetyWalker2dVelocity-v1" ## low_r
 # ENV_ID="SafetyAntVelocity-v1" ##low_r ！
 # ENV_ID="SafetyHumanoidVelocity-v1" ##low_r！
 # ENV_ID="SafetyHopperVelocity-v1" #low_r
-export CUDA_VISIBLE_DEVICES=0
+export CUDA_VISIBLE_DEVICES=1
 PARALLEL=1
 TOTAL_STEPS=5000000
 DEVICE="cuda:0"
 VECTOR_ENV_NUMS=20
 TORCH_THREADS=16
 SEED=0
-TASK_DESCRIPTION="{bs20000}_{negative_slope=0.001}_{rc}_{merge}_{1-weight}_{no_abs}_{adv_stand}"
+# TASK_DESCRIPTION="{adv_stand}_{in_((1-pid))}"
+# TASK_DESCRIPTION="{adv_stand}_{state_wise}"
+# TASK_DESCRIPTION="{adv_stand}_{clip_high}"
+# TASK_DESCRIPTION="{bs20000}_{negative_slope=0.001}_{rc}_{merge}_{1-weight}_{no_abs}_{adv_stand}"
 # TASK_DESCRIPTION="{divide_stand}_{out_in_pos_f)}_{in_r-f}_{bs20000}_{negative_slope=0.001}"
 # TASK_DESCRIPTION="{out|in_pos_f}_{in_(r-f*lag)/(1+lag)}_{adv_f>0}_{negative_slope=0.001}_{250ep}"
+TASK_DESCRIPTION="{out_lag_lr_0.1}_{statewise_multiplier_value_init}"
+# TASK_DESCRIPTION="{out_lag_lr_0.1}"
 # cost_limit: 0
 
 # 运行训练脚本

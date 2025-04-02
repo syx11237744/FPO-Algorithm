@@ -370,9 +370,10 @@ class Logger:  # pylint: disable=too-many-instance-attributes
             )
             return mean.item(), min_val.mean().item(), max_val.mean().item(), std.item()
 
-        mean, std = dist_statistics_scalar(  # pylint: disable=unbalanced-tuple-unpacking
-            torch.tensor(vals).to(os.getenv('OMNISAFE_DEVICE', 'cpu')),
-        )
+        # mean, std = dist_statistics_scalar(  # pylint: disable=unbalanced-tuple-unpacking
+        #     torch.tensor(vals).to(os.getenv('OMNISAFE_DEVICE', 'cpu')),
+        # )
+        mean = torch.mean(torch.tensor(vals, dtype=torch.float32))
         return (mean.item(),)
 
     @property
