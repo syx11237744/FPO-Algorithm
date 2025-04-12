@@ -16,12 +16,14 @@
 
 from __future__ import annotations
 
+import math
 from typing import Any
 
 import torch
 import torch.nn as nn
 from rich.progress import track
 from torch.nn.utils.clip_grad import clip_grad_norm_
+from torch.nn.functional import leaky_relu
 from torch.utils.data import DataLoader, TensorDataset
 
 from omnisafe.adapter import FPOAdapter
@@ -127,9 +129,13 @@ class FPO(PolicyGradient):
             cost_gamma=self._cfgs.algo_cfgs.cost_gamma,
             feasibility_threshold=self._cfgs.algo_cfgs.feasibility_threshold,
         )
+        self._lagrange_in_region: Lagrange = Lagrange(**self._cfgs.lagrange_cfgs)
         self._lagrange_out_region: Lagrange = Lagrange(**self._cfgs.lagrange_cfgs)
         self._feasibility_threshold = self._cfgs.algo_cfgs.feasibility_threshold
         self._leaky_relu = torch.nn.LeakyReLU(negative_slope=self._cfgs.algo_cfgs.leaky_alpha)
+        self._log_cg = torch.nn.Parameter(torch.tensor([math.log(self._cfgs.algo_cfgs.cg_init)],
+                                                       dtype=torch.float32, device=self._device))
+        self._log_cg_optim = torch.optim.Adam([self._log_cg], lr=self._cfgs.algo_cfgs.cg_lr)
 
     def _init_log(self) -> None:
         """Log info about epoch.
@@ -239,9 +245,14 @@ class FPO(PolicyGradient):
         self._logger.register_key('Train/penalty_term_in')
         self._logger.register_key('Train/penalty_term_out')
         self._logger.register_key('Train/in_region_ratio')
-        self._logger.register_key('Train/neg_in_ratio')
+        self._logger.register_key('Train/cri_ratio')
+        # self._logger.register_key('Train/neg_in_ratio')
+        self._logger.register_key('Train/cg')
+        # self._logger.register_key('Train/pi_grad_norm_r')
+        # self._logger.register_key('Train/pi_grad_norm_c')
+        # self._logger.register_key('Train/pi_grad_cosine')
         self._logger.register_key('Metrics/InRegionLagrangeMultiplier')
-        self._logger.register_key('Metrics/InRegionLagrangeMultiplierStd')
+        # self._logger.register_key('Metrics/InRegionLagrangeMultiplierStd')
         self._logger.register_key('Metrics/OutRegionLagrangeMultiplier')
 
         # register environment specific keys
@@ -255,21 +266,22 @@ class FPO(PolicyGradient):
         self._update_actor_critic(data)
 
         # compute penalty_term_in and out
-        penalty_term_in, penalty_term_out = self._calculate_penalty_term(data)
 
         # update Lagrange multiplier parameter
-        statewise_multiplier = self._actor_critic.multiplier(data['value_c'].unsqueeze(1))[0]
-        statewise_multiplier_loss = masked_mean(-statewise_multiplier * penalty_term_in, data['mask_in_region'])
-        self._actor_critic.multiplier_optimizer.zero_grad()
-        statewise_multiplier_loss.backward()
-        self._actor_critic.multiplier_optimizer.step()
+        # statewise_multiplier = self._actor_critic.multiplier(data['value_c'].unsqueeze(1))[0]
+        # statewise_multiplier_loss = torch.where((statewise_multiplier > 0) | (penalty_term_in > 0),
+        #                                         -statewise_multiplier * penalty_term_in, 0)
+        # statewise_multiplier_loss = masked_mean(statewise_multiplier_loss, data['mask_in_region'])
+        # self._actor_critic.multiplier_optimizer.zero_grad()
+        # statewise_multiplier_loss.backward()
+        # self._actor_critic.multiplier_optimizer.step()
 
-        self._lagrange_out_region.update_lagrange_multiplier(penalty_term_out)
+        # self._lagrange_out_region.update_lagrange_multiplier(penalty_term_out)
 
-        statewise_multiplier = statewise_multiplier.detach()
-        self._logger.store({'Metrics/InRegionLagrangeMultiplier': statewise_multiplier.mean().item()})
-        self._logger.store({'Metrics/InRegionLagrangeMultiplierStd': statewise_multiplier.std().item()})
-        self._logger.store({'Metrics/OutRegionLagrangeMultiplier': self._lagrange_out_region.lagrangian_multiplier.item()})
+        # statewise_multiplier = statewise_multiplier.detach()
+        # self._logger.store({'Metrics/InRegionLagrangeMultiplier': self._lagrange_in_region.lagrangian_multiplier.item()})
+        # self._logger.store({'Metrics/InRegionLagrangeMultiplierStd': statewise_multiplier.std().item()})
+        # self._logger.store({'Metrics/OutRegionLagrangeMultiplier': self._lagrange_out_region.lagrangian_multiplier.item()})
 
     def _update_actor_critic(
             self,
@@ -323,13 +335,14 @@ class FPO(PolicyGradient):
         adv_c = data['adv_c']
         adv_rc = data['adv_rc']
         value_c = data['value_c']
-        mask_in_region = data['mask_in_region']
+        unstandardized_adv_c = data['unstandardized_adv_c']
+        cost_ret = data['cost_ret']
 
         original_obs = obs
         old_distribution = self._actor_critic.actor(obs)
 
-        with torch.no_grad():
-            statewise_multiplier = self._actor_critic.multiplier(value_c.unsqueeze(1))[0]
+        # with torch.no_grad():
+        #     statewise_multiplier = torch.clamp_min(self._actor_critic.multiplier(value_c.unsqueeze(1))[0], 0)
 
         # dataloader = DataLoader(
         #     dataset=TensorDataset(
@@ -341,6 +354,15 @@ class FPO(PolicyGradient):
 
         update_counts = 0
         final_kl = 0.0
+
+        vc_bound = target_value_c
+        cg = self._log_cg.exp().detach()
+        init_fea = (value_c < self._feasibility_threshold) & (cost_ret < self._feasibility_threshold)
+        fea = init_fea & (vc_bound < self._feasibility_threshold)
+        cri = fea & (vc_bound > self._feasibility_threshold - cg)
+        weight = torch.ones_like(fea)
+        init_in = vc_bound < self._feasibility_threshold
+        last_in = init_in
 
         for i in track(range(self._cfgs.algo_cfgs.update_iters), description='Updating...'):
             # for (
@@ -360,9 +382,44 @@ class FPO(PolicyGradient):
             self._update_reward_critic(obs, target_value_r)
             self._update_cost_critic(obs, target_value_c)
             self._update_recover_critic(obs, target_value_rc)
-            self._update_actor(obs, act, cost, logp, adv_r, adv_c, adv_rc, mask_in_region, statewise_multiplier)
+            self._update_actor(obs, act, cost, logp, adv_r, adv_c, adv_rc, fea, cri, weight)
 
-            new_distribution = self._actor_critic.actor(original_obs)
+            with torch.no_grad():
+                new_distribution = self._actor_critic.actor(original_obs)
+                new_logp = self._actor_critic.actor.log_prob(act)
+            new_ratio = torch.exp(new_logp - logp)
+            new_vc_bound = torch.clamp(new_ratio * unstandardized_adv_c + value_c, 0, 1)
+            # vio = fea & (new_vc_bound > self._feasibility_threshold)
+            # delta_cg = masked_mean(leaky_relu(self._feasibility_threshold - vc_bound - cg, 1e-6), vio)
+            # # delta_cg = delta_cg + (fea.any() & ~(vio.any())).float() * self._leaky_relu(-cg)
+            # log_cg_loss = -self._log_cg * delta_cg
+            # self._log_cg_optim.zero_grad()
+            # log_cg_loss.backward()
+            # self._log_cg_optim.step()
+
+            penalty_term_in = masked_mean(leaky_relu(new_vc_bound - self._feasibility_threshold, 1e-6), cri)
+            self._lagrange_in_region.update_lagrange_multiplier(max(penalty_term_in, 0))
+
+            penalty_term_out = masked_mean(self._leaky_relu(new_vc_bound - vc_bound), ~fea)
+            self._lagrange_out_region.update_lagrange_multiplier(penalty_term_out)
+
+            self._logger.store({
+                'Train/penalty_term_in': penalty_term_in.item(),
+                'Train/penalty_term_out': penalty_term_out.item(),
+                'Train/in_region_ratio': fea.float().mean().item(),
+                'Train/cri_ratio': cri.float().mean().item(),
+                'Train/cg': cg.item(),
+                'Metrics/InRegionLagrangeMultiplier': self._lagrange_in_region.lagrangian_multiplier.item(),
+                'Metrics/OutRegionLagrangeMultiplier': self._lagrange_out_region.lagrangian_multiplier.item(),
+            })
+
+            vc_bound = new_vc_bound
+            cg = self._log_cg.exp().detach()
+            fea = init_fea & (vc_bound < self._feasibility_threshold)
+            cri = fea & (vc_bound > self._feasibility_threshold - cg)
+            curr_in = vc_bound < self._feasibility_threshold
+            weight = torch.where(last_in | curr_in, 1, torch.clamp_max(weight * 1.5, 10))
+            last_in = curr_in
 
             kl = (
                 torch.distributions.kl.kl_divergence(old_distribution, new_distribution)
@@ -384,6 +441,7 @@ class FPO(PolicyGradient):
                 'Value/Adv_r': adv_r.mean().item(),
                 'Value/Adv_c': adv_c.mean().item(),
                 'Value/Adv_rc': adv_rc.mean().item(),
+                'Value/Adv_c_unstandardized': unstandardized_adv_c.mean().item(),
                 'Train/KL': final_kl,
             },
         )
@@ -397,8 +455,9 @@ class FPO(PolicyGradient):
         adv_r: torch.Tensor,
         adv_c: torch.Tensor,
         adv_rc: torch.Tensor,
-        mask_in_region: torch.Tensor,
-        statewise_multiplier: torch.Tensor,
+        fea: torch.Tensor,
+        cri: torch.Tensor,
+        weight: torch.Tensor,
     ) -> None:
         """Update policy network under a double for loop.
 
@@ -427,8 +486,9 @@ class FPO(PolicyGradient):
             adv_r=adv_r,
             adv_c=adv_c,
             adv_rc=adv_rc,
-            mask_in_region=mask_in_region,
-            statewise_multiplier=statewise_multiplier,
+            fea=fea,
+            cri=cri,
+            weight=weight,
         )
         self._actor_critic.actor_optimizer.zero_grad()
         loss.backward()
@@ -449,8 +509,9 @@ class FPO(PolicyGradient):
         adv_r: torch.Tensor,
         adv_c: torch.Tensor,
         adv_rc: torch.Tensor,
-        mask_in_region: torch.Tensor,
-        statewise_multiplier: torch.Tensor,
+        fea: torch.Tensor,
+        cri: torch.Tensor,
+        weight: torch.Tensor,
     ) -> torch.Tensor:
         r"""Computing pi/actor loss.
 
@@ -480,11 +541,16 @@ class FPO(PolicyGradient):
         logp_ = self._actor_critic.actor.log_prob(act)
         std = self._actor_critic.actor.std
         ratio = torch.exp(logp_ - logp)
+
+        # in_region_multiplier = self._lagrange_in_region.lagrangian_multiplier.item()
         out_region_multiplier = self._lagrange_out_region.lagrangian_multiplier.item()
 
-        adv = torch.where(~mask_in_region, (adv_r - out_region_multiplier * adv_c) / (1 + out_region_multiplier),
-                          (adv_r - statewise_multiplier * adv_c) / (1 + statewise_multiplier))
+        # adv_cri = (adv_r - in_region_multiplier * adv_c) / (1 + in_region_multiplier)
+        adv_out = (adv_r - out_region_multiplier * adv_c) / (1 + out_region_multiplier)
+        # adv = torch.where(~fea, adv_out, torch.where(cri, adv_cri, adv_r))
+        adv = torch.where(~fea, adv_out, adv_r)
         adv = torch.where(cost > 0, adv_rc, adv)
+        # adv = adv * weight
         # standized adv
         adv = (adv - adv.mean()) / (adv.std() + 1e-8)
 
@@ -494,6 +560,19 @@ class FPO(PolicyGradient):
             1 + self._cfgs.algo_cfgs.clip,
         )
         loss = -torch.min(ratio * adv, ratio_cliped * adv).mean()
+
+        # loss_r = (fea.float() * -torch.min(ratio * adv_r, ratio_cliped * adv_r)).mean()
+        # loss_c = ((~fea).float() * -torch.min(ratio * -adv_c, ratio_cliped * -adv_c)).mean()
+        # grad_r = torch.autograd.grad(loss_r, self._actor_critic.actor.parameters(), retain_graph=True)
+        # grad_c = torch.autograd.grad(loss_c, self._actor_critic.actor.parameters(), retain_graph=True)
+        # flat_grad_r = torch.cat([grad.view(-1) for grad in grad_r])
+        # flat_grad_c = torch.cat([grad.view(-1) for grad in grad_c])
+        # dot_product = torch.sum(flat_grad_r * flat_grad_c)
+        # grad_norm_r = torch.norm(flat_grad_r)
+        # grad_norm_c = torch.norm(flat_grad_c)
+        # grad_cosine = dot_product / (grad_norm_r * grad_norm_c + 1e-8)
+        # loss = loss_r + loss_c
+
         loss -= self._cfgs.algo_cfgs.entropy_coef * distribution.entropy().mean()
         # useful extra info
         entropy = distribution.entropy().mean().item()
@@ -503,6 +582,9 @@ class FPO(PolicyGradient):
                 'Train/PolicyRatio': ratio,
                 'Train/PolicyStd': std,
                 'Loss/Loss_pi': loss.mean().item(),
+                # 'Train/pi_grad_norm_r': grad_norm_r.item(),
+                # 'Train/pi_grad_norm_c': grad_norm_c.item(),
+                # 'Train/pi_grad_cosine': grad_cosine.item(),
             },
         )
         return loss
