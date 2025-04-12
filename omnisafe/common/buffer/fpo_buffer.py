@@ -1,13 +1,12 @@
-
-
 from __future__ import annotations
 
 import torch
 
 from omnisafe.common.buffer import OnPolicyBuffer
 from omnisafe.typing import DEVICE_CPU, AdvatageEstimator, OmnisafeSpace
-from omnisafe.utils import distributed
 from omnisafe.utils.math import discount_cumsum
+
+
 class FPOBuffer(OnPolicyBuffer):
     def __init__(  # pylint: disable=too-many-arguments
         self,
@@ -44,6 +43,7 @@ class FPOBuffer(OnPolicyBuffer):
         self.data['adv_rc'] = torch.zeros((size,), dtype=torch.float32, device=device)
         self.data['value_rc'] = torch.zeros((size,), dtype=torch.float32, device=device)
         self.data['target_value_rc'] = torch.zeros((size,), dtype=torch.float32, device=device)
+        self.data['cost_ret'] = torch.zeros((size,), dtype=torch.float32, device=device)
         assert advantage_estimator == "gae", 'FPOBuffer only supports GAE advantage estimator.'
 
     def store(self, **data: torch.Tensor) -> None:
@@ -73,32 +73,7 @@ class FPOBuffer(OnPolicyBuffer):
 
     def get(self) -> dict[str, torch.Tensor]:
         self.ptr, self.path_start_idx = 0, 0
-
-        data = {
-            'obs': self.data['obs'],
-            'act': self.data['act'],
-            'cost': self.data['cost'],
-            'target_value_r': self.data['target_value_r'],
-            'adv_r': self.data['adv_r'],
-            'logp': self.data['logp'],
-            'discounted_ret': self.data['discounted_ret'],
-            'adv_c': self.data['adv_c'],
-            'target_value_c': self.data['target_value_c'],
-            'value_c': self.data['value_c'],
-            'adv_rc': self.data['adv_rc'],
-            'target_value_rc': self.data['target_value_rc'],
-        }
-
-        adv_mean, adv_std, *_ = distributed.dist_statistics_scalar(data['adv_r'])
-        cadv_mean, cadv_std, *_ = distributed.dist_statistics_scalar(data['adv_c'])
-        rcadv_mean, rcadv_std, *_ = distributed.dist_statistics_scalar(data['adv_rc'])
-        if self._standardized_adv_r:
-            data['adv_r'] = (data['adv_r'] - adv_mean) / (adv_std + 1e-8)
-        if self._standardized_adv_c:
-            data['standardized_adv_c'] = (data['adv_c'] - cadv_mean) / (cadv_std + 1e-8)
-            data['adv_rc'] = (data['adv_rc'] - rcadv_mean) / (rcadv_std + 1e-8)
-
-        return data
+        return self.data
 
     def finish_path(
         self,
@@ -114,7 +89,7 @@ class FPOBuffer(OnPolicyBuffer):
         if last_value_c is None:
             last_value_c = torch.zeros(1, device=self._device)
         if last_value_rc is None:
-            last_value_rc = torch.zeros(1, device=self._device)
+            last_value_rc = torch.ones(1, device=self._device)
 
         path_slice = slice(self.path_start_idx, self.ptr)
         path_length = self.ptr - self.path_start_idx
@@ -132,40 +107,28 @@ class FPOBuffer(OnPolicyBuffer):
         self.data['discounted_ret'][path_slice] = discountred_ret
         rewards -= self._penalty_coefficient * costs
 
+        cost_ret = discount_cumsum(costs, self._cost_gamma)[:-1]
+        self.data['cost_ret'][path_slice] = cost_ret
+
         adv_r, target_value_r = self._calculate_adv_and_value_targets(
             values_r,
             rewards,
             lam=self._lam,
         )
 
-        #! 想一下cost=1在最后一个位置会怎么样,应该不会怎么样，因为连乘的是乘到倒数第二个位置上的，所以不用担心？
-        if len(self.cost_one_positions) == 0:
-            adv_c, target_value_c = self._calculate_feasibility_advantage(
-                costs=costs,
-                values=values_c,
-                lam=self._lam_c,
-            )
-        else:
-            adv_c, target_value_c = self._process_segments(
-                path_length=path_length,
-                costs=costs,
-                values=values_c,
-                segment_positions=self.cost_one_positions,
-            )
+        adv_c, target_value_c = self._process_segments(
+            path_length=path_length,
+            costs=costs,
+            values=values_c,
+            segment_positions=self.cost_one_positions,
+        )
 
-        if len(self.cost_zero_positions) == 0:
-            adv_rc, target_value_rc = self._calculate_feasibility_advantage(
-                costs=1 - costs,
-                values=values_rc,
-                lam=self._lam_c,
-            )
-        else:
-            adv_rc, target_value_rc = self._process_segments(
-                path_length=path_length,
-                costs=1 - costs,
-                values=values_rc,
-                segment_positions=self.cost_zero_positions,
-            )
+        adv_rc, target_value_rc = self._process_segments(
+            path_length=path_length,
+            costs=1 - costs,
+            values=values_rc,
+            segment_positions=self.cost_zero_positions,
+        )
 
         self.data['adv_r'][path_slice] = adv_r
         self.data['target_value_r'][path_slice] = target_value_r
@@ -177,13 +140,13 @@ class FPOBuffer(OnPolicyBuffer):
         self.path_start_idx = self.ptr
         self.cost_one_positions = []
         self.cost_zero_positions = []
-    
+
     def _process_segments(
         self,
         path_length: int,
         costs: torch.Tensor,
         values: torch.Tensor,
-        segment_positions: list,
+        segment_positions: list[int],
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """
         Process path segments separated by cost=1 positions.
@@ -199,44 +162,36 @@ class FPOBuffer(OnPolicyBuffer):
         # Initialize tensors
         adv_f = torch.zeros(path_length, device=self._device)
         target_value_f = torch.zeros(path_length, device=self._device)
-        
-        # Create segment boundaries
-        segment_positions_tensor = torch.tensor(segment_positions, device=self._device)
-        segments = torch.cat([
-            torch.tensor([0], device=self._device),
-            segment_positions_tensor + 1,
-            torch.tensor([path_length], device=self._device)
-        ])
-        
-        # Process each segment
-        for start, end in zip(segments[:-1], segments[1:]):
-            #! 需要对最后一个cost可能=1的情况进行特殊判断，不然会出现数据丢失的问题
-            # 对于这种情况的话，start == end == path_length，那么我们给start - 1
-            if start >= end:
-                continue
 
+        # Create segment boundaries
+        if len(segment_positions) == 0 or segment_positions[-1] < path_length - 1:
+            segment_positions.append(path_length - 1)
+
+        # Process each segment
+        start = 0
+        for end in segment_positions:
             # Create masks for the current segment
-            path_slice = slice(start, end)
-            value_slice = slice(start, end + 1)
-            
+            path_slice = slice(start, end + 1)
+            value_slice = slice(start, end + 2)
+            start = end + 1
+
             # Calculate advantages for the segment
             segment_adv, segment_target = self._calculate_feasibility_advantage(
                 costs=costs[value_slice],
                 values=values[value_slice],
                 lam=self._lam_c,
             )
-            
+
             # Update results
             adv_f[path_slice] = segment_adv
             target_value_f[path_slice] = segment_target
-        
+
         return adv_f, target_value_f
 
     def _calculate_feasibility_advantage(
         self,
         costs: torch.Tensor,           # c(s)
         values: torch.Tensor,    # F^π(s)
-        # next_value_feasibility: torch.Tensor,  # F^π(s') value_feasibility[1:]
         lam: float,
     ) -> tuple[torch.Tensor, torch.Tensor]:
         """Calculate feasibility advantage using GAE estimation.
@@ -256,21 +211,10 @@ class FPOBuffer(OnPolicyBuffer):
         )
         
         # 使用GAE方式计算优势
-        advantages = discount_cumsum(deltas, self._cost_gamma * lam).to(torch.float32)
+        advantages = discount_cumsum(deltas, self._cost_gamma * lam)#.to(torch.float32)
         
         # clip <= 1
         feasibility_targets = torch.clamp(advantages + values[:-1], 0, 1)
+        advantages = feasibility_targets - values[:-1]
         
         return advantages, feasibility_targets
-
-
-
-        
-        
-
-
-        
-
-    
-
-    
