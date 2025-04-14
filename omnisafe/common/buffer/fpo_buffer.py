@@ -63,10 +63,8 @@ class FPOBuffer(OnPolicyBuffer):
         cost = data.get('cost', torch.tensor(0)).item()
         assert cost in (0, 1), f'Cost value must be 0 or 1, but got {cost}'
         if cost == 1:
-            self.data['value_c'][self.ptr] = 1
             self.cost_one_positions.append(self.ptr - self.path_start_idx)
         else:
-            self.data['value_rc'][self.ptr] = 1
             self.cost_zero_positions.append(self.ptr - self.path_start_idx)
 
         self.ptr += 1
@@ -211,10 +209,8 @@ class FPOBuffer(OnPolicyBuffer):
         )
         
         # 使用GAE方式计算优势
-        advantages = discount_cumsum(deltas, self._cost_gamma * lam)#.to(torch.float32)
+        advantages = discount_cumsum(deltas, self._cost_gamma * lam)
         
-        # clip <= 1
-        feasibility_targets = torch.clamp(advantages + values[:-1], 0, 1)
-        advantages = feasibility_targets - values[:-1]
+        feasibility_targets = advantages + values[:-1]
         
         return advantages, feasibility_targets

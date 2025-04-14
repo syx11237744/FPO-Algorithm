@@ -1,4 +1,3 @@
-
 from __future__ import annotations
 
 from typing import Any
@@ -8,7 +7,7 @@ from rich.progress import track
 
 from omnisafe.adapter import OnPolicyAdapter
 from omnisafe.models.actor_critic import ConstraintActorCritic
-from omnisafe.common.buffer import FPOBuffer
+from omnisafe.common.buffer import VectorFPOBuffer
 from omnisafe.common.logger import Logger
 
 class FPOAdapter(OnPolicyAdapter):
@@ -16,7 +15,7 @@ class FPOAdapter(OnPolicyAdapter):
         self,
         steps_per_epoch: int,
         agent: ConstraintActorCritic,
-        buffer: FPOBuffer,
+        buffer: VectorFPOBuffer,
         logger: Logger,
     ) -> None:
         """Rollout the environment and store the data in the buffer.
@@ -40,10 +39,17 @@ class FPOAdapter(OnPolicyAdapter):
             description=f'Processing rollout for epoch: {logger.current_epoch}...',
         ):
             act, value_r, value_c, value_rc, logp = agent.step(obs)
-            value_c = torch.clamp(value_c, 0, 1)
-            value_rc = torch.clamp(value_rc, 0, 1)
-            
             next_obs, reward, cost, terminated, truncated, info = self.step(act)
+
+            # clip (0, 1)
+            # value_c = torch.clamp(value_c, 0, 1)
+            # value_rc = torch.clamp(value_rc, 0, 1)
+
+            # tight clip
+            value_c[cost == 1] = 1.
+            value_c[cost == 0] = torch.clamp(value_c[cost == 0], 0., self._cfgs.algo_cfgs.cost_gamma)
+            value_rc[cost == 0] = 1.
+            value_rc[cost == 1] = torch.clamp(value_rc[cost == 1], 0., self._cfgs.algo_cfgs.cost_gamma)
 
             self._log_value(reward=reward, cost=cost, info=info)
 
@@ -75,9 +81,9 @@ class FPOAdapter(OnPolicyAdapter):
 
             for idx, (done, time_out) in enumerate(zip(terminated, truncated)):
                 if epoch_end or done or time_out:
-                    last_value_r = torch.zeros(1)
-                    last_value_c = torch.zeros(1)
-                    last_value_rc = torch.zeros(1)
+                    last_value_r = torch.zeros(1, device=self._device)
+                    last_value_c = torch.zeros(1, device=self._device)
+                    last_value_rc = torch.ones(1, device=self._device)
                     if not done:
                         if epoch_end:
                             _, last_value_r, last_value_c, last_value_rc, _ = agent.step(obs[idx])
@@ -86,8 +92,8 @@ class FPOAdapter(OnPolicyAdapter):
                                 info['final_observation'][idx],
                             )
                         last_value_r = last_value_r.unsqueeze(0)
-                        last_value_c = last_value_c.unsqueeze(0)
-                        last_value_rc = last_value_rc.unsqueeze(0)
+                        last_value_c = torch.clamp(last_value_c, 0, 1).unsqueeze(0)
+                        last_value_rc = torch.clamp(last_value_rc, 0, 1).unsqueeze(0)
 
                     if done or time_out:
                         self._log_metrics(logger, idx)
