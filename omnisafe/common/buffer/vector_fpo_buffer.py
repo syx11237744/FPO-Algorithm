@@ -1,5 +1,6 @@
-import torch
 from typing import Dict, Optional
+
+import torch
 
 from omnisafe.common.buffer import FPOBuffer
 from omnisafe.typing import DEVICE_CPU, AdvatageEstimator, OmnisafeSpace
@@ -86,9 +87,7 @@ class VectorFPOBuffer(FPOBuffer):
         for buffer in self.buffers[1:]:
             for k, v in buffer.get().items():
                 data_pre[k].append(v)
-        data = {k: torch.cat(v, dim=0) for k, v in data_pre.items()}
-
-        mask_in_region = data['value_c'] < self._feasibility_threshold
+        data = {k: torch.cat(v) for k, v in data_pre.items()}
 
         adv_mean, adv_std = compute_statistics(data['adv_r'])
         cadv_mean, cadv_std = compute_statistics(data['adv_c'])
@@ -101,8 +100,6 @@ class VectorFPOBuffer(FPOBuffer):
             data['adv_c'] = standardize_adv(data['adv_c'], cadv_mean, cadv_std)
             data['adv_rc'] = standardize_adv(data['adv_rc'], rcadv_mean, rcadv_std)
 
-        data['mask_in_region'] = mask_in_region
-
         return data
 
 
@@ -111,4 +108,4 @@ def compute_statistics(data):
 
 
 def standardize_adv(adv, mean, std):
-    return ((adv - mean) / (std + 1e-8))
+    return (adv - mean) / (std + 1e-8)

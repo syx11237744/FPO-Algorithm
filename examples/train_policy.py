@@ -39,13 +39,6 @@ if __name__ == '__main__':
         help='the name of test environment',
     )
     parser.add_argument(
-        '--parallel',
-        default=1,
-        type=int,
-        metavar='N',
-        help='number of paralleled progress for calculations.',
-    )
-    parser.add_argument(
         '--total-steps',
         type=int,
         default=10000000,
@@ -60,28 +53,14 @@ if __name__ == '__main__':
         help='device to use for training',
     )
     parser.add_argument(
-        '--vector-env-nums',
-        type=int,
-        default=1,
-        metavar='VECTOR-ENV',
-        help='number of vector envs to use for training',
-    )
-    parser.add_argument(
-        '--torch-threads',
-        type=int,
-        default=16,
-        metavar='THREADS',
-        help='number of threads to use for torch',
-    )
-    parser.add_argument(
         '--task_description',
         type=str,
-        required=True,
+        default='',
     )
     parser.add_argument(
         '--seed',
         type=int,
-        default=None,
+        default=0,
         metavar='SEED',
         help='random seed for training',
     )

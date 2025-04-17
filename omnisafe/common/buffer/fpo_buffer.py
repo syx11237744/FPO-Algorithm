@@ -43,7 +43,6 @@ class FPOBuffer(OnPolicyBuffer):
         self.data['adv_rc'] = torch.zeros((size,), dtype=torch.float32, device=device)
         self.data['value_rc'] = torch.zeros((size,), dtype=torch.float32, device=device)
         self.data['target_value_rc'] = torch.zeros((size,), dtype=torch.float32, device=device)
-        self.data['cost_ret'] = torch.zeros((size,), dtype=torch.float32, device=device)
         assert advantage_estimator == "gae", 'FPOBuffer only supports GAE advantage estimator.'
 
     def store(self, **data: torch.Tensor) -> None:
@@ -104,9 +103,6 @@ class FPOBuffer(OnPolicyBuffer):
         discountred_ret = discount_cumsum(rewards, self._gamma)[:-1]
         self.data['discounted_ret'][path_slice] = discountred_ret
         rewards -= self._penalty_coefficient * costs
-
-        cost_ret = discount_cumsum(costs, self._cost_gamma)[:-1]
-        self.data['cost_ret'][path_slice] = cost_ret
 
         adv_r, target_value_r = self._calculate_adv_and_value_targets(
             values_r,

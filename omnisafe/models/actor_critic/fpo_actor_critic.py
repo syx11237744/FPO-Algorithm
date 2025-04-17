@@ -6,7 +6,6 @@ from omnisafe.models.actor_critic import ConstraintActorCritic
 import torch
 from torch import optim
 
-from gymnasium.spaces import Box
 from omnisafe.models.base import Critic
 from omnisafe.models.critic.critic_builder import CriticBuilder
 from omnisafe.typing import OmnisafeSpace
@@ -65,23 +64,6 @@ class FPOActorCritic(ConstraintActorCritic):
             self.recover_critic_optimizer: optim.Optimizer = optim.Adam(
                 self.recover_critic.parameters(),
                 lr=model_cfgs.critic.lr,
-            )
-
-        self.multiplier: Critic = CriticBuilder(
-            obs_space=Box(low=0., high=1., shape=(1,)),
-            act_space=act_space,
-            hidden_sizes=model_cfgs.multiplier.hidden_sizes,
-            activation=model_cfgs.multiplier.activation,
-            weight_initialization_mode=model_cfgs.weight_initialization_mode,
-            num_critics=1,
-            use_obs_encoder=False,
-        ).build_critic('v')
-        self.add_module('multiplier', self.multiplier)
-
-        if model_cfgs.multiplier.lr is not None:
-            self.multiplier_optimizer: optim.Optimizer = optim.Adam(
-                self.multiplier.parameters(),
-                lr=model_cfgs.multiplier.lr,
             )
 
     def step(

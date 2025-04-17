@@ -25,15 +25,22 @@ LOG_DIR = ''
 if __name__ == '__main__':
     evaluator = omnisafe.Evaluator(render_mode='rgb_array')
     scan_dir = os.scandir(os.path.join(LOG_DIR, 'torch_save'))
+    last_pt_file = None
     for item in scan_dir:
         if item.is_file() and item.name.split('.')[-1] == 'pt':
-            evaluator.load_saved(
-                save_dir=LOG_DIR,
-                model_name=item.name,
-                camera_name='track',
-                width=256,
-                height=256,
-            )
-            evaluator.render(num_episodes=1)
-            evaluator.evaluate(num_episodes=1)
+            if last_pt_file is None:
+                last_pt_file = item
+            elif item.name > last_pt_file.name:
+                last_pt_file = item
+    if last_pt_file is None:
+        raise ValueError('No pt file found in the directory.')
+    evaluator.load_saved(
+        save_dir=LOG_DIR,
+        model_name=item.name,
+        camera_name='track',
+        width=256,
+        height=256,
+    )
+    evaluator.render(num_episodes=10)
+    # evaluator.evaluate(num_episodes=1)
     scan_dir.close()

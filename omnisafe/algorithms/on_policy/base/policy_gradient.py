@@ -23,7 +23,6 @@ import torch
 import torch.nn as nn
 from rich.progress import track
 from torch.nn.utils.clip_grad import clip_grad_norm_
-from torch.utils.data import DataLoader, TensorDataset
 
 from omnisafe.adapter import OnPolicyAdapter
 from omnisafe.algorithms import registry
@@ -31,6 +30,7 @@ from omnisafe.algorithms.base_algo import BaseAlgo
 from omnisafe.common.buffer import VectorOnPolicyBuffer
 from omnisafe.common.logger import Logger
 from omnisafe.models.actor_critic.constraint_actor_critic import ConstraintActorCritic
+from omnisafe.utils.CustomDataLoader import CustomDataLoader
 from omnisafe.utils import distributed
 
 
@@ -357,8 +357,8 @@ class PolicyGradient(BaseAlgo):
         original_obs = obs
         old_distribution = self._actor_critic.actor(obs)
 
-        dataloader = DataLoader(
-            dataset=TensorDataset(obs, act, logp, target_value_r, target_value_c, adv_r, adv_c),
+        dataloader = CustomDataLoader(
+            obs, act, logp, target_value_r, target_value_c, adv_r, adv_c,
             batch_size=self._cfgs.algo_cfgs.batch_size,
             shuffle=True,
         )

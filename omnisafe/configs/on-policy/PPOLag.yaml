@@ -23,11 +23,11 @@ defaults:
     # number of threads for torch
     torch_threads: 16
     # number of vectorized environments
-    vector_env_nums: 10
+    vector_env_nums: 20
     # number of parallel agent, similar to a3c
     parallel: 1
     # total number of steps to train
-    total_steps: 5000000
+    total_steps: 10000000
   # algorithm configurations
   algo_cfgs:
     # number of steps to update the policy
@@ -79,11 +79,11 @@ defaults:
   # logger configurations
   logger_cfgs:
     # use wandb for logging
-    use_wandb: True
+    use_wandb: False
     # wandb project name
     wandb_project: omnisafe
     # use tensorboard for logging
-    use_tensorboard: False
+    use_tensorboard: True
     # save model frequency
     save_model_freq: 100
     # save logger path
@@ -130,6 +130,33 @@ defaults:
     lambda_optimizer: "Adam"
   # environment specific configurations
   env_cfgs: {}
+
+SafetyAntVelocity-v1:
+  algo_cfgs:
+    batch_size: 4000
+
+SafetyHalfCheetahVelocity-v1:
+  algo_cfgs:
+    batch_size: 4000
+
+SafetyHopperVelocity-v1:
+  algo_cfgs:
+    batch_size: 4000
+    entropy_coef: 0.01
+
+SafetyHumanoidVelocity-v1:
+  algo_cfgs:
+    batch_size: 4000
+    entropy_coef: 0.01
+
+SafetySwimmerVelocity-v1:
+  algo_cfgs:
+    batch_size: 4000
+
+SafetyWalker2dVelocity-v1:
+  algo_cfgs:
+    batch_size: 4000
+    entropy_coef: 0.01
 
 ShadowHandCatchOver2UnderarmSafeFinger:
   # training configurations
