@@ -143,7 +143,9 @@ SafetyHopperVelocity-v1:
 SafetyHumanoidVelocity-v1:
   algo_cfgs:
     batch_size: 4000
-    entropy_coef: 0.01
+  model_cfgs:
+    actor:
+      lr: 0.0001
 
 SafetySwimmerVelocity-v1:
   algo_cfgs:
