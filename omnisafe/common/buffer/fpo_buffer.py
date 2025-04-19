@@ -31,15 +31,15 @@ class FPOBuffer(OnPolicyBuffer):
             gamma=gamma,
             cost_gamma=cost_gamma,
             lam=lam,
-            advantage_estimator=advantage_estimator,
-            device=device,
             lam_c=lam_c,
+            advantage_estimator=advantage_estimator,
             penalty_coefficient=penalty_coefficient,
             standardized_adv_r=standardized_adv_r,
             standardized_adv_c=standardized_adv_c,
+            device=device,
         )
-        self.cost_one_positions: list[int] = []  # 记录cost=1的轨迹位置
-        self.cost_zero_positions: list[int] = []  # 记录cost=0的轨迹位置
+        self.cost_one_positions: list[int] = []
+        self.cost_zero_positions: list[int] = []
         self.data['adv_rc'] = torch.zeros((size,), dtype=torch.float32, device=device)
         self.data['value_rc'] = torch.zeros((size,), dtype=torch.float32, device=device)
         self.data['target_value_rc'] = torch.zeros((size,), dtype=torch.float32, device=device)
@@ -48,12 +48,7 @@ class FPOBuffer(OnPolicyBuffer):
     def store(self, **data: torch.Tensor) -> None:
         """Store data into the buffer and record positions where cost equals one.
 
-        #? 除了一般的数据或许还需要一个数据的存储是Feasible Function对于这个状态的输出, 那么我们的adapter就需要传进来这个数据，
-        #? 我们是可以获取这个数据的吗？那么就需要看一看adapter了。是可以的，我们只需要在我们的actor_critic 提供一个可以接受状态进行预测的接口即可
-        #! 实际是就是value_c，我们也可以进行重命名，这样更加直观
-
         Args:
-            is_cost_one (bool): Whether the cost equals one at this position.
             data (torch.Tensor): The data to store.
         """
         assert self.ptr < self.max_size, 'No more space in the buffer!'
@@ -78,9 +73,6 @@ class FPOBuffer(OnPolicyBuffer):
         last_value_c: torch.Tensor | None = None,
         last_value_rc: torch.Tensor | None = None,
     ) -> None:
-        """
-        在原有的finish path的基础上，我们需要修改cost的advantage的计算方式
-        """
         if last_value_r is None:
             last_value_r = torch.zeros(1, device=self._device)
         if last_value_c is None:
@@ -184,7 +176,7 @@ class FPOBuffer(OnPolicyBuffer):
 
     def _calculate_feasibility_advantage(
         self,
-        costs: torch.Tensor,           # c(s)
+        costs: torch.Tensor,     # c(s)
         values: torch.Tensor,    # F^π(s)
         lam: float,
     ) -> tuple[torch.Tensor, torch.Tensor]:
@@ -197,14 +189,12 @@ class FPOBuffer(OnPolicyBuffer):
             gamma: Discount factor
             lam: GAE lambda parameter
         """
-        # 计算类似TD误差的值
         deltas = (
             costs[:-1] +  # c(s)
             (1 - costs[:-1]) * self._cost_gamma * values[1:] -  # (1-c(s))γF^π(s')
             values[:-1]  # -F^π(s)
         )
         
-        # 使用GAE方式计算优势
         advantages = discount_cumsum(deltas, self._cost_gamma * lam)
         
         feasibility_targets = advantages + values[:-1]

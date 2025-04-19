@@ -20,7 +20,6 @@ class VectorFPOBuffer(FPOBuffer):
         penalty_coefficient: float,
         standardized_adv_r: bool,
         standardized_adv_c: bool,
-        feasibility_threshold: float,
         num_envs: int = 1,
         device: torch.device = DEVICE_CPU,
     ) -> None:
@@ -28,7 +27,6 @@ class VectorFPOBuffer(FPOBuffer):
         self._num_buffers: int = num_envs
         self._standardized_adv_r: bool = standardized_adv_r
         self._standardized_adv_c: bool = standardized_adv_c
-        self._feasibility_threshold: float = feasibility_threshold
 
         if num_envs < 1:
             raise ValueError('num_envs must be greater than 0.')
