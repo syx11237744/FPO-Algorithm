@@ -23,11 +23,11 @@ defaults:
     # number of threads for torch
     torch_threads: 16
     # number of vectorized environments
-    vector_env_nums: 10
+    vector_env_nums: 20
     # number of parallel agent, similar to a3c
     parallel: 1
     # total number of steps to train
-    total_steps: 5000000
+    total_steps: 10000000
   # algorithm configurations
   algo_cfgs:
     # number of steps to update the policy
@@ -87,7 +87,7 @@ defaults:
   # logger configurations
   logger_cfgs:
     # use wandb for logging
-    use_wandb: True
+    use_wandb: False
     # wandb project name
     wandb_project: omnisafe
     # use tensorboard for logging
@@ -118,7 +118,7 @@ defaults:
       activation: tanh
       # out_activation: tanh
       # learning rate
-      lr: 0.0003
+      lr: 0.0001
     critic:
       # hidden layer sizes
       hidden_sizes: [64, 64]
@@ -126,6 +126,51 @@ defaults:
       activation: tanh
       # learning rate
       lr: 0.0003
+
+SafetyPointCircle1-v0:
+  model_cfgs:
+    actor:
+      lr: 0.00003
+
+SafetyCarCircle1-v0:
+  model_cfgs:
+    actor:
+      lr: 0.0003
+
+SafetyAntVelocity-v1:
+  algo_cfgs:
+    batch_size: 4000
+  model_cfgs:
+    actor:
+      lr: 0.0003
+
+SafetyHalfCheetahVelocity-v1:
+  algo_cfgs:
+    batch_size: 4000
+  model_cfgs:
+    actor:
+      lr: 0.0003
+
+SafetyHopperVelocity-v1:
+  algo_cfgs:
+    batch_size: 4000
+    entropy_coef: 0.01
+  model_cfgs:
+    actor:
+      lr: 0.0003
+
+SafetyHumanoidVelocity-v1:
+  algo_cfgs:
+    batch_size: 4000
+
+SafetySwimmerVelocity-v1:
+  algo_cfgs:
+    batch_size: 4000
+
+SafetyWalker2dVelocity-v1:
+  algo_cfgs:
+    batch_size: 4000
+    entropy_coef: 0.01
 
 SafeMetaDrive:
   # training configurations

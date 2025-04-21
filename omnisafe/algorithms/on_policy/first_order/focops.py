@@ -19,11 +19,11 @@ from __future__ import annotations
 import torch
 from rich.progress import track
 from torch.distributions import Normal
-from torch.utils.data import DataLoader, TensorDataset
 
 from omnisafe.algorithms import registry
 from omnisafe.algorithms.on_policy.base.policy_gradient import PolicyGradient
 from omnisafe.common.lagrange import Lagrange
+from omnisafe.utils.CustomDataLoader import CustomDataLoader
 from omnisafe.utils import distributed
 
 
@@ -170,18 +170,16 @@ class FOCOPS(PolicyGradient):
             old_mean = old_distribution.mean
             old_std = old_distribution.stddev
 
-        dataloader = DataLoader(
-            dataset=TensorDataset(
-                obs,
-                act,
-                logp,
-                target_value_r,
-                target_value_c,
-                adv_r,
-                adv_c,
-                old_mean,
-                old_std,
-            ),
+        dataloader = CustomDataLoader(
+            obs,
+            act,
+            logp,
+            target_value_r,
+            target_value_c,
+            adv_r,
+            adv_c,
+            old_mean,
+            old_std,
             batch_size=self._cfgs.algo_cfgs.batch_size,
             shuffle=True,
         )
