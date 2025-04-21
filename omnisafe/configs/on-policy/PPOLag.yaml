@@ -110,7 +110,7 @@ defaults:
       activation: tanh
       # out_activation: tanh
       # learning rate
-      lr: 0.0003
+      lr: 0.0001
     critic:
       # hidden layer sizes
       hidden_sizes: [64, 64]
@@ -131,25 +131,41 @@ defaults:
   # environment specific configurations
   env_cfgs: {}
 
+SafetyPointCircle1-v0:
+  model_cfgs:
+    actor:
+      lr: 0.00003
+
+SafetyCarCircle1-v0:
+  model_cfgs:
+    actor:
+      lr: 0.0003
+
 SafetyAntVelocity-v1:
   algo_cfgs:
     batch_size: 4000
+  model_cfgs:
+    actor:
+      lr: 0.0003
 
 SafetyHalfCheetahVelocity-v1:
   algo_cfgs:
     batch_size: 4000
+  model_cfgs:
+    actor:
+      lr: 0.0003
 
 SafetyHopperVelocity-v1:
   algo_cfgs:
     batch_size: 4000
     entropy_coef: 0.01
+  model_cfgs:
+    actor:
+      lr: 0.0003
 
 SafetyHumanoidVelocity-v1:
   algo_cfgs:
     batch_size: 4000
-  model_cfgs:
-    actor:
-      lr: 0.0001
 
 SafetySwimmerVelocity-v1:
   algo_cfgs:
