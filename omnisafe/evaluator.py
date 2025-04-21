@@ -173,12 +173,12 @@ class Evaluator:  # pylint: disable=too-many-instance-attributes
         assert isinstance(observation_space, Box), 'The observation space must be Box.'
         assert isinstance(action_space, Box), 'The action space must be Box.'
 
+        if env.need_time_limit_wrapper:
+            env = TimeLimit(env, device=torch.device('cpu'), time_limit=env.max_episode_steps)
         if self._cfgs['algo_cfgs']['obs_normalize']:
             obs_normalizer = Normalizer(shape=observation_space.shape, clip=5)
             obs_normalizer.load_state_dict(model_params['obs_normalizer'])
             env = ObsNormalize(env, device=torch.device('cpu'), norm=obs_normalizer)
-        if env.need_time_limit_wrapper:
-            env = TimeLimit(env, device=torch.device('cpu'), time_limit=1000)
         env = ActionScale(env, device=torch.device('cpu'), low=-1.0, high=1.0)
 
         if hasattr(self._cfgs['algo_cfgs'], 'action_repeat'):
