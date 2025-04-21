@@ -36,7 +36,7 @@ if __name__ == '__main__':
         raise ValueError('No pt file found in the directory.')
     evaluator.load_saved(
         save_dir=LOG_DIR,
-        model_name=item.name,
+        model_name=last_pt_file.name,
         camera_name='track',
         width=256,
         height=256,
