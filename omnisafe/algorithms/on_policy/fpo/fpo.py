@@ -141,15 +141,18 @@ class FPO(PPO):
         self._logger.register_key('Value/recover')
 
         # log information about lagrange multipliers
+        self._logger.register_key('Train/feasible_ratio')
+        self._logger.register_key('Train/critical_ratio')
         self._logger.register_key('Train/penalty_term_in')
         self._logger.register_key('Train/penalty_term_out')
-        self._logger.register_key('Train/in_region_ratio')
         self._logger.register_key('Metrics/InRegionLagrangeMultiplier')
         self._logger.register_key('Metrics/OutRegionLagrangeMultiplier')
 
     def _update(self) -> None:
-        # update policy and value function
         data = self._buf.get()
+        data = self._process_data(data)
+
+        # update policy and value function
         self._update_actor_critic(data)
 
         # update Lagrange multipliers
@@ -164,10 +167,44 @@ class FPO(PPO):
             'Metrics/OutRegionLagrangeMultiplier': self._lagrange_out_region.lagrangian_multiplier.item(),
         })
 
-    def _update_actor_critic(
-            self,
-            data: dict[str, torch.Tensor],
-        ) -> None:
+    def _process_data(self, data: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
+        cost = data['cost']
+        target_value_c = data['target_value_c']
+        adv_r = data['adv_r']
+        adv_c = data['adv_c']
+        adv_rc = data['adv_rc']
+        value_c = data['value_c']
+        unstandardized_adv_c = data['unstandardized_adv_c']
+
+        vio = cost > 0
+        fea = ~vio & (target_value_c < self._feasibility_threshold)
+        cri = fea & (
+            (unstandardized_adv_c * (1 - self._cfgs.algo_cfgs.clip) + value_c > self._feasibility_threshold) |
+            (unstandardized_adv_c * (1 + self._cfgs.algo_cfgs.clip) + value_c > self._feasibility_threshold)
+        )
+
+        in_region_multiplier = self._lagrange_in_region.lagrangian_multiplier.item()
+        out_region_multiplier = self._lagrange_out_region.lagrangian_multiplier.item()
+        weight = torch.clamp((1 - target_value_c / self._feasibility_threshold), 0, 1) ** in_region_multiplier
+        weight = weight + (1 - weight) / (1 + out_region_multiplier)
+        adv_in = weight * adv_r - (1 - weight) * adv_c
+        adv_out = (adv_r - out_region_multiplier * adv_c) / (1 + out_region_multiplier)
+        adv = torch.where(vio, adv_rc, torch.where(fea, adv_in, adv_out))
+        adv = (adv - adv.mean()) / (adv.std() + 1e-8)
+
+        data.update({'fea': fea, 'cri': cri, 'adv': adv})
+
+        self._logger.store({
+            'Value/Adv_r': adv_r.mean().item(),
+            'Value/Adv_c': adv_c.mean().item(),
+            'Value/Adv_rc': adv_rc.mean().item(),
+            'Value/Adv_c_unstandardized': unstandardized_adv_c.mean().item(),
+            'Train/feasible_ratio': fea.float().mean().item(),
+            'Train/critical_ratio': cri.float().mean().item(),
+        })
+        return data
+
+    def _update_actor_critic(self, data: dict[str, torch.Tensor]) -> None:
         """Update actor, critic.
 
         -  Get the ``data`` from buffer
@@ -207,33 +244,14 @@ class FPO(PPO):
 
         obs = data['obs']
         act = data['act']
-        cost = data['cost']
         logp = data['logp']
         target_value_r = data['target_value_r']
         target_value_c = data['target_value_c']
         target_value_rc = data['target_value_rc']
-        adv_r = data['adv_r']
-        adv_c = data['adv_c']
-        adv_rc = data['adv_rc']
-        value_c = data['value_c']
-        unstandardized_adv_c = data['unstandardized_adv_c']
+        adv = data['adv']
 
         original_obs = obs
         old_distribution = self._actor_critic.actor(obs)
-
-        fea = value_c < self._feasibility_threshold
-        vio = cost > 0
-
-        in_region_multiplier = self._lagrange_in_region.lagrangian_multiplier.item()
-        out_region_multiplier = self._lagrange_out_region.lagrangian_multiplier.item()
-
-        weight = torch.clamp((1 - value_c / self._feasibility_threshold), 0, 1) ** in_region_multiplier
-        weight = weight + (1 - weight) / (1 + out_region_multiplier)
-
-        adv_in = weight * adv_r - (1 - weight) * adv_c
-        adv_out = (adv_r - out_region_multiplier * adv_c) / (1 + out_region_multiplier)
-        adv = torch.where(vio, adv_rc, torch.where(fea, adv_in, adv_out))
-        adv = (adv - adv.mean()) / (adv.std() + 1e-8)
 
         dataloader = CustomDataLoader(
             obs, act, logp, target_value_r, target_value_c, target_value_rc, adv,
@@ -268,30 +286,22 @@ class FPO(PPO):
                 self._logger.log(f'Early stopping at iter {i + 1} due to reaching max kl')
                 break
 
-        self._logger.store(
-            {
-                'Train/StopIter': update_counts,  # pylint: disable=undefined-loop-variable
-                'Value/Adv_r': adv_r.mean().item(),
-                'Value/Adv_c': adv_c.mean().item(),
-                'Value/Adv_rc': adv_rc.mean().item(),
-                'Value/Adv_c_unstandardized': unstandardized_adv_c.mean().item(),
-                'Train/KL': final_kl,
-                'Train/in_region_ratio': fea.float().mean().item(),
-            },
-        )
+        self._logger.store({
+            'Train/StopIter': update_counts,  # pylint: disable=undefined-loop-variable
+            'Train/KL': final_kl,
+        })
 
     def _compute_adv_surrogate(self, adv_r: torch.Tensor, adv_c: torch.Tensor) -> torch.Tensor:
         return adv_r
 
-    def _calculate_penalty_term(
-        self,
-        data: dict[str, torch.Tensor],
-    ) -> tuple[float, float]:
+    def _calculate_penalty_term(self, data: dict[str, torch.Tensor]) -> tuple[float, float]:
         obs = data['obs']
         act = data['act']
         logp = data['logp']
         unstandardized_adv_c = data['unstandardized_adv_c']
         value_c = data['value_c']
+        fea = data['fea']
+        cri = data['cri']
 
         with torch.no_grad():
             _ = self._actor_critic.actor(obs)
@@ -301,10 +311,8 @@ class FPO(PPO):
         term_out = unstandardized_adv_c * ratio
         term_in = term_out + value_c - self._feasibility_threshold
 
-        fea = value_c < self._feasibility_threshold
-
-        penalty_term_in = masked_mean(self._leaky_relu(term_in), fea).item()
-        penalty_term_out = masked_mean(self._leaky_relu(term_out), ~fea).item()
+        penalty_term_in = masked_mean(torch.clamp_min(term_in, 0), cri).item()
+        penalty_term_out = masked_mean(torch.clamp_min(term_out, 0), ~fea).item()
 
         return penalty_term_in, penalty_term_out
 
