@@ -125,7 +125,6 @@ class FPONG(NaturalPG):
         self._lagrange_in_region: Lagrange = Lagrange(**self._cfgs.lagrange_in_cfgs)
         self._lagrange_out_region: Lagrange = Lagrange(**self._cfgs.lagrange_out_cfgs)
         self._feasibility_threshold = self._cfgs.algo_cfgs.feasibility_threshold
-        self._leaky_relu = torch.nn.LeakyReLU(negative_slope=self._cfgs.algo_cfgs.leaky_alpha)
 
     def _init_log(self) -> None:
         super()._init_log()

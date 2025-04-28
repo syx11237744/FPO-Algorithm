@@ -128,7 +128,6 @@ class Config(dict):
     max_len: int
     num_threads: int
     feasibility_threshold: float
-    leaky_alpha: float
 
     def __init__(self, **kwargs: Any) -> None:
         """Initialize an instance of :class:`Config`."""

@@ -125,7 +125,6 @@ class FPO(PPO):
         self._lagrange_in_region: Lagrange = Lagrange(**self._cfgs.lagrange_in_cfgs)
         self._lagrange_out_region: Lagrange = Lagrange(**self._cfgs.lagrange_out_cfgs)
         self._feasibility_threshold = self._cfgs.algo_cfgs.feasibility_threshold
-        self._leaky_relu = torch.nn.LeakyReLU(negative_slope=self._cfgs.algo_cfgs.leaky_alpha)
 
     def _init_log(self) -> None:
         super()._init_log()
@@ -142,7 +141,6 @@ class FPO(PPO):
 
         # log information about lagrange multipliers
         self._logger.register_key('Train/feasible_ratio')
-        self._logger.register_key('Train/critical_ratio')
         self._logger.register_key('Train/penalty_term_in')
         self._logger.register_key('Train/penalty_term_out')
         self._logger.register_key('Metrics/InRegionLagrangeMultiplier')
@@ -173,15 +171,10 @@ class FPO(PPO):
         adv_r = data['adv_r']
         adv_c = data['adv_c']
         adv_rc = data['adv_rc']
-        value_c = data['value_c']
         unstandardized_adv_c = data['unstandardized_adv_c']
 
         vio = cost > 0
         fea = ~vio & (target_value_c < self._feasibility_threshold)
-        cri = fea & (
-            (unstandardized_adv_c * (1 - self._cfgs.algo_cfgs.clip) + value_c > self._feasibility_threshold) |
-            (unstandardized_adv_c * (1 + self._cfgs.algo_cfgs.clip) + value_c > self._feasibility_threshold)
-        )
 
         in_region_multiplier = self._lagrange_in_region.lagrangian_multiplier.item()
         out_region_multiplier = self._lagrange_out_region.lagrangian_multiplier.item()
@@ -192,7 +185,7 @@ class FPO(PPO):
         adv = torch.where(vio, adv_rc, torch.where(fea, adv_in, adv_out))
         adv = (adv - adv.mean()) / (adv.std() + 1e-8)
 
-        data.update({'fea': fea, 'cri': cri, 'adv': adv})
+        data.update({'fea': fea, 'adv': adv})
 
         self._logger.store({
             'Value/Adv_r': adv_r.mean().item(),
@@ -200,7 +193,6 @@ class FPO(PPO):
             'Value/Adv_rc': adv_rc.mean().item(),
             'Value/Adv_c_unstandardized': unstandardized_adv_c.mean().item(),
             'Train/feasible_ratio': fea.float().mean().item(),
-            'Train/critical_ratio': cri.float().mean().item(),
         })
         return data
 
@@ -301,7 +293,6 @@ class FPO(PPO):
         unstandardized_adv_c = data['unstandardized_adv_c']
         value_c = data['value_c']
         fea = data['fea']
-        cri = data['cri']
 
         with torch.no_grad():
             _ = self._actor_critic.actor(obs)
@@ -309,9 +300,9 @@ class FPO(PPO):
         ratio = torch.exp(logp_ - logp)
 
         term_out = unstandardized_adv_c * ratio
-        term_in = term_out + value_c - self._feasibility_threshold
+        term_in = term_out / (1 - self._cfgs.algo_cfgs.cost_gamma) + value_c - self._feasibility_threshold
 
-        penalty_term_in = masked_mean(torch.clamp_min(term_in, 0), cri).item()
+        penalty_term_in = masked_mean(torch.clamp_min(term_in, 0), fea).item()
         penalty_term_out = masked_mean(torch.clamp_min(term_out, 0), ~fea).item()
 
         return penalty_term_in, penalty_term_out

@@ -60,7 +60,6 @@ defaults:
     # use cost
     use_cost: True
     feasibility_threshold: 0.1
-    leaky_alpha: 0.001
     # Damping value for conjugate gradient
     cg_damping: 0.1
     # Number of conjugate gradient iterations

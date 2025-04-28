@@ -62,7 +62,6 @@ defaults:
     # use cost
     use_cost: True
     feasibility_threshold: 0.1
-    leaky_alpha: 0.001
   # logger configurations
   logger_cfgs:
     # use wandb for logging
