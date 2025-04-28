@@ -16,6 +16,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 import torch
 import torch.nn as nn
 from rich.progress import track
@@ -131,6 +133,15 @@ class FPO(PPO):
         super()._init_log()
 
         # log information about actor
+        what_to_save: dict[str, Any] = {}
+        what_to_save['pi'] = self._actor_critic.actor
+        what_to_save['critic'] = self._actor_critic.cost_critic
+        if self._cfgs.algo_cfgs.obs_normalize:
+            obs_normalizer = self._env.save()['obs_normalizer']
+            what_to_save['obs_normalizer'] = obs_normalizer
+        self._logger.setup_torch_saver(what_to_save)
+        self._logger.torch_save()
+        
         self._logger.register_key('Value/Adv_r')
         self._logger.register_key('Value/Adv_c')
         self._logger.register_key('Value/Adv_rc')

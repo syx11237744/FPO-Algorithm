@@ -50,6 +50,7 @@ from omnisafe.common.control_barrier_function.crabs.utils import create_model_an
 from omnisafe.envs.core import CMDP, make
 from omnisafe.envs.wrapper import ActionRepeat, ActionScale, ObsNormalize, TimeLimit
 from omnisafe.models.actor import ActorBuilder
+from omnisafe.models.critic import CriticBuilder
 from omnisafe.models.actor_critic import ConstraintActorCritic, ConstraintActorQCritic
 from omnisafe.models.base import Actor
 from omnisafe.utils.config import Config
@@ -300,8 +301,21 @@ class Evaluator:  # pylint: disable=too-many-instance-attributes
                 activation=pi_cfg['activation'],
                 weight_initialization_mode=weight_initialization_mode,
             )
+
             self._actor = actor_builder.build_actor(actor_type)
             self._actor.load_state_dict(model_params['pi'])
+            if hasattr(self._cfgs, 'algo') and self._cfgs['algo'] == 'FPO':
+                self._critic = CriticBuilder(
+                    obs_space=observation_space,
+                    act_space=action_space,
+                    hidden_sizes=self._cfgs['model_cfgs']['critic']['hidden_sizes'],
+                    activation=self._cfgs['model_cfgs']['critic']['activation'],
+                    weight_initialization_mode=weight_initialization_mode,
+                    num_critics=1,
+                    use_obs_encoder=False, 
+                ).build_critic('v')
+                print('model params keys:', model_params.keys())
+                self._critic.load_state_dict(model_params['critic'])
 
         if self._cfgs['algo'] in ['CRABS']:
             self._init_crabs(model_params)
@@ -813,4 +827,59 @@ class Evaluator:  # pylint: disable=too-many-instance-attributes
                 
         self._env.close()
         self._pre_env.close()
-    
+
+    def collect_obs(
+        self,
+        seed: int,
+        grid_size: int = 101,
+        x_range: tuple = (-2, 2),
+        y_range: tuple = (-2, 2),
+        save_path: str = 'saved_obs.npz',
+    ) -> dict:
+        if self._env is None or (self._actor is None and self._planner is None):
+            raise ValueError(
+                'The environment and the policy must be provided or created before evaluating the agent.',
+            )
+        
+        underlying = self._env._env._env._env._env.env.env.env.task
+        xs = np.linspace(x_range[0], x_range[1], grid_size)
+        ys = np.linspace(y_range[0], y_range[1], grid_size)
+        xs, ys = np.meshgrid(xs, ys)
+        
+        values_c = np.zeros_like(xs)
+        
+        self._env.reset(seed=seed)
+        
+        original_qvel = underlying.data.qvel.copy() if hasattr(underlying.data, 'qvel') else None
+        
+        for i in range(grid_size):
+            for j in range(grid_size):
+                pos = np.array([xs[i, j], ys[i, j]])
+                
+                qpos = underlying.data.qpos.copy()
+                qpos[:2] = pos
+                underlying.data.qpos[:] = qpos
+                
+                if original_qvel is not None:
+                    underlying.data.qvel[:] = 0
+                
+                obs = underlying.obs()
+                obs = torch.tensor(obs, device='cpu', dtype=torch.float32).unsqueeze(0)
+                with torch.no_grad():
+                    c = self._critic(obs)
+                    values_c[i, j] = c[0].item()
+            
+            if (i+1) % 10 == 0 or i+1 == grid_size:
+                print(f"进度: {i+1}/{grid_size}")
+        
+        result = {
+            'x': xs,
+            'y': ys,
+            'values_c': values_c
+        }
+        # result.update(env_info)
+
+        np.savez(save_path, **result)
+
+        return result
+        
