@@ -439,5 +439,19 @@ def plot_threshold_bargraph(csv_file):
     plt.savefig(os.path.join(RESULT_PATH, 'combined_threshold_bargraph.png'), dpi=300, bbox_inches='tight')
     plt.close()
 
-# 使用示例
-# plot_threshold_bargraph('threshold_statistics.csv', 'figures')
+def plot_cost_observation(
+        data_path, 
+        x_range: tuple = (-2, 2),
+        y_range: tuple = (-2, 2),
+        save_path: str = 'heatmap.png',
+    ):
+    data = np.load(data_path)
+    keys = data.keys()
+    values_c = data['values_c']
+    plt.figure(figsize=(8, 6))
+    plt.imshow(values_c, extent=(x_range[0], x_range[1], y_range[0], y_range[1]), origin='lower')
+    plt.colorbar(label='Critic Value')
+    plt.title('Critic Value Heatmap')
+    plt.xlabel('X Position')
+    plt.ylabel('Y Position')
+    plt.savefig(save_path)
