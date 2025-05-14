@@ -315,7 +315,8 @@ class Evaluator:  # pylint: disable=too-many-instance-attributes
                     use_obs_encoder=False, 
                 ).build_critic('v')
                 print('model params keys:', model_params.keys())
-                self._critic.load_state_dict(model_params['critic'])
+                if 'critic' in model_params.keys():
+                    self._critic.load_state_dict(model_params['critic'])
 
         if self._cfgs['algo'] in ['CRABS']:
             self._init_crabs(model_params)
@@ -535,133 +536,6 @@ class Evaluator:  # pylint: disable=too-many-instance-attributes
 
         return fps
 
-    # def render(  # pylint: disable=too-many-locals,too-many-arguments,too-many-branches,too-many-statements
-    #     self,
-    #     num_episodes: int = 1,
-    #     save_replay_path: str | None = None,
-    #     max_render_steps: int = 2000,
-    #     cost_criteria: float = 1.0,
-    #     seed: int = 42,
-    # ) -> None:  # pragma: no cover
-    #     """Render the environment for one episode.
-
-    #     Args:
-    #         num_episodes (int, optional): The number of episodes to render. Defaults to 1.
-    #         save_replay_path (str or None, optional): The path to save the replay video. Defaults to
-    #             None.
-    #         max_render_steps (int, optional): The maximum number of steps to render. Defaults to 2000.
-    #         cost_criteria (float, optional): The discount factor for the cost. Defaults to 1.0.
-    #     """
-    #     assert (
-    #         self._env is not None
-    #     ), 'The environment must be provided or created before rendering.'
-    #     assert (
-    #         self._actor is not None or self._planner is not None
-    #     ), 'The policy or planner must be provided or created before rendering.'
-    #     if save_replay_path is None:
-    #         save_replay_path = os.path.join(self._save_dir, 'video', self._model_name.split('.')[0])
-    #     result_path = os.path.join(save_replay_path, 'result.txt')
-    #     print(self._dividing_line)
-    #     print(f'Saving the replay video to {save_replay_path},\n and the result to {result_path}.')
-    #     print(self._dividing_line)
-
-    #     horizon = 1000
-    #     frames = []
-    #     obs, _ = self._env.reset()
-    #     if self._render_mode == 'human':
-    #         self._env.render()
-    #     elif self._render_mode == 'rgb_array':
-    #         frames.append(self._env.render())
-    #     torch.manual_seed(seed)
-    #     np.random.seed(seed)
-    #     random.seed(seed)
-
-    #     episode_rewards: list[float] = []
-    #     episode_costs: list[float] = []
-    #     episode_lengths: list[float] = []
-        
-
-    #     for episode_idx in range(num_episodes):
-    #         self._safety_obs = torch.ones(1)
-    #         step = 0
-    #         done = False
-    #         ep_ret, ep_cost, length = 0.0, 0.0, 0.0
-    #         while (
-    #             not done and step <= max_render_steps
-    #         ):  # a big number to make sure the episode will end
-    #             if 'Saute' in self._cfgs['algo'] or 'Simmer' in self._cfgs['algo']:
-    #                 obs = torch.cat([obs, self._safety_obs], dim=-1)
-    #             with torch.no_grad():
-    #                 if self._actor is not None:
-    #                     act = self._actor.predict(
-    #                         obs.reshape(
-    #                             -1,
-    #                             obs.shape[-1],  # to make sure the shape is (1, obs_dim)
-    #                         ),
-    #                         deterministic=True,
-    #                     ).reshape(
-    #                         -1,  # to make sure the shape is (act_dim,)
-    #                     )
-    #                 elif self._planner is not None:
-    #                     act = self._planner.output_action(
-    #                         obs.unsqueeze(0).to('cpu'),
-    #                     )[
-    #                         0
-    #                     ].squeeze(0)
-    #                 else:
-    #                     raise ValueError(
-    #                         'The policy must be provided or created before evaluating the agent.',
-    #                     )
-    #             obs, rew, cost, terminated, truncated, _ = self._env.step(act)
-    #             if 'Saute' in self._cfgs['algo'] or 'Simmer' in self._cfgs['algo']:
-    #                 self._safety_obs -= cost.unsqueeze(-1) / self._safety_budget
-    #                 self._safety_obs /= self._cfgs.algo_cfgs.saute_gamma
-    #             step += 1
-    #             done = bool(terminated or truncated)
-    #             ep_ret += rew.item()
-    #             ep_cost += (cost_criteria**length) * cost.item()
-    #             if (
-    #                 'EarlyTerminated' in self._cfgs['algo']
-    #                 and ep_cost >= self._cfgs.algo_cfgs.cost_limit
-    #             ):
-    #                 terminated = torch.as_tensor(True)
-    #             length += 1
-
-    #             if self._render_mode == 'rgb_array':
-    #                 frames.append(self._env.render())
-    #         if ep_cost != 0:
-    #             self._env.reset()
-    #             frames = []
-    #             continue
-    #         if self._render_mode == 'rgb_array_list':
-    #             frames = self._env.render()
-    #         if save_replay_path is not None:
-    #             save_video(
-    #                 frames,
-    #                 save_replay_path,
-    #                 fps=self.fps,
-    #                 episode_trigger=lambda x: True,
-    #                 video_length=horizon,
-    #                 episode_index=episode_idx,
-    #                 name_prefix='eval',
-    #             )
-    #         self._env.reset()
-    #         frames = []
-    #         episode_rewards.append(ep_ret)
-    #         episode_costs.append(ep_cost)
-    #         episode_lengths.append(length)
-    #         with open(result_path, 'a+', encoding='utf-8') as f:
-    #             print(f'Episode {episode_idx} results:', file=f)
-    #             print(f'Episode reward: {ep_ret}', file=f)
-    #             print(f'Episode cost: {ep_cost}', file=f)
-    #             print(f'Episode length: {length}', file=f)
-    #     with open(result_path, 'a+', encoding='utf-8') as f:
-    #         print(self._dividing_line)
-    #         print('Evaluation results:', file=f)
-    #         print(f'Average episode reward: {np.mean(episode_rewards)}', file=f)
-    #         print(f'Average episode cost: {np.mean(episode_costs)}', file=f)
-    #         print(f'Average episode length: {np.mean(episode_lengths)}', file=f)
-    #     self._env.close()
     def render(  # pylint: disable=too-many-locals,too-many-arguments,too-many-branches,too-many-statements
         self,
         num_episodes: int = 10,
@@ -669,6 +543,7 @@ class Evaluator:  # pylint: disable=too-many-instance-attributes
         max_render_steps: int = 2000,
         cost_criteria: float = 1.0,
         seed: int = 42,
+        only_record_violations: bool = False,
     ) -> None:  # pragma: no cover
         """Render the environment for one episode.
 
@@ -747,11 +622,11 @@ class Evaluator:  # pylint: disable=too-many-instance-attributes
                     
                 length += 1
                 
-            if ep_cost == 0:
-                print(f"Episode with seed {current_seed} had zero cost, trying next seed.")
-                base_seed += num_episodes 
+            print(f"Episode with seed {current_seed} had cost {ep_cost} and retrun {ep_ret}, rendering.")
+            
+            if only_record_violations and not (ep_cost > 0):
+                print(f"Episode with seed {current_seed} had cost {ep_cost} and return {ep_ret}, skipping (no violations).")
                 continue
-            print(f"Episode with seed {current_seed} had cost {ep_cost}, rendering.")
             
             frames = []
             obs, _ = self._env.reset(seed=current_seed)
@@ -836,6 +711,7 @@ class Evaluator:  # pylint: disable=too-many-instance-attributes
         y_range: tuple = (-2, 2),
         save_path: str = 'saved_obs.npz',
     ) -> dict:
+        """Collect observations from the pointgoal environment."""
         if self._env is None or (self._actor is None and self._planner is None):
             raise ValueError(
                 'The environment and the policy must be provided or created before evaluating the agent.',
@@ -855,16 +731,16 @@ class Evaluator:  # pylint: disable=too-many-instance-attributes
         for i in range(grid_size):
             for j in range(grid_size):
                 pos = np.array([xs[i, j], ys[i, j]])
-                
-                qpos = underlying.data.qpos.copy()
-                qpos[:2] = pos
-                underlying.data.qpos[:] = qpos
+                # Set the position of the goal
+                underlying.data.qpos[:2] = pos
                 
                 if original_qvel is not None:
                     underlying.data.qvel[:] = 0
                 
                 obs = underlying.obs()
                 obs = torch.tensor(obs, device='cpu', dtype=torch.float32).unsqueeze(0)
+                # Set the acceleration to zero
+                obs[0,:2] = 0
                 with torch.no_grad():
                     c = self._critic(obs)
                     values_c[i, j] = c[0].item()
@@ -877,7 +753,6 @@ class Evaluator:  # pylint: disable=too-many-instance-attributes
             'y': ys,
             'values_c': values_c
         }
-        # result.update(env_info)
 
         np.savez(save_path, **result)
 

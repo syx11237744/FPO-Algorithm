@@ -13,7 +13,7 @@ from matplotlib.ticker import MaxNLocator
 from omnisafe.utils.path import LOG_PATH, RESULT_PATH, FIGURE_PATH
 
 
-EXTENSION = 'png'
+EXTENSION = 'pdf'
 
 TAGLOGNAMES = {
     'cost': 'Metrics/EpCost',
@@ -32,44 +32,55 @@ ALGLABELCOLORS = {
     'RCPO': ('RCPO', 'C4'),
     'PPOLag': ('PPO-Lag', 'C5'),
     'TRPOPID': ('TRPO-PID', 'C6'),
-    'P3O': ('PPO-Lag', 'C7'),
+    'CPPOPID': ('CPPO-PID', 'C8'),
+    'P3O': ('P3O', 'C7'),
     'FPO': ('FPO', 'C3'),
 }
 
+ALGLABELS = {
+    'CPO': 'CPO',
+    'PCPO': 'PCPO',
+    'FOCOPS': 'FOCOPS',
+    'RCPO': 'RCPO',
+    'PPOLag': 'PPO-Lag',
+    'TRPOPID': 'TRPO-PID',
+    'P3O': 'P3O',
+    'FPO': 'FPO',
+}
+
 ENVTAGRANGES = {
-    # 'SafetyPointGoal1-v0': {
-    #     'cost': (-3, 30),
-    #     'return': (-5, 30),
-    # },
-    # 'SafetyPointPush1-v0': {
-    #     'cost': (-5, 50),
-    #     'return': (-15, 40),
-    # },
-    # 'SafetyPointButton1-v0': {
-    #     'cost': (-10, 100),
-    #     'return': (-9, 20),
-    # },
-    # 'SafetyCarGoal1-v0': {
-    #     'cost': (-5, 50),
-    # },
-    # 'SafetyCarPush1-v0': {
-    #     'cost': (-5, 50),
-    #     'return': (-5, 25),
-    # },
-    # 'SafetyCarButton1-v0': {
-    #     'cost': (-15, 150),
-    # },
+    'SafetyPointGoal1-v0': {
+        'cost': (-8, 80),
+    },
+    'SafetyPointPush1-v0': {
+        'cost': (-8, 80),
+    },
+    'SafetyPointButton1-v0': {
+        'cost': (-13, 130),
+    },
+    'SafetyCarGoal1-v0': {
+        'cost': (-4, 40),
+    },
+    'SafetyCarPush1-v0': {
+        'cost': (-6, 60),
+    },
+    'SafetyPointCircle1-v0': {
+        'cost': (-25, 250),
+    },
     'SafetyCarCircle1-v0': {
         'cost': (-15, 150),
     },
     'SafetyAntVelocity-v1': {
         'cost': (-1, 10),
     },
+    'SafetyHalfCheetahVelocity-v1': {
+        'cost': (-5, 50),
+    },
     'SafetyHopperVelocity-v1': {
         'cost': (-5, 50),
     },
     'SafetySwimmerVelocity-v1': {
-        'cost': (-15, 150),
+        'cost': (-9, 90),
     },
 }
 
@@ -79,12 +90,12 @@ NOMAGNIFIERENVS = [
 ]
 
 COSTMAGNIFIERRANGES = {
-    'SafetyPointGoal1-v0': (-0.2, 8),
-    'SafetyPointPush1-v0': (-0.5, 5),
-    'SafetyPointButton1-v0': (-0.5, 8),
-    'SafetyCarGoal1-v0': (-0.1, 1),
+    'SafetyPointGoal1-v0': (-0.6, 6),
+    'SafetyPointPush1-v0': (-0.6, 6),
+    'SafetyPointButton1-v0': (-0.2, 12),
+    'SafetyCarGoal1-v0': (-0.2, 2),
     'SafetyCarPush1-v0': (-0.5, 5),
-    'SafetyCarButton1-v0': (-1, 10),
+    'SafetyCarButton1-v0': (-1.5, 15),
     'SafetyPointCircle1-v0': (-1, 10),
     'SafetyCarCircle1-v0': (-1, 10),
     'SafetyHalfCheetahVelocity-v1': (-0.2, 2),
@@ -111,6 +122,12 @@ ENVTITLES = {
 }
 
 ENVTAGLEFTMARGINS = {
+    'SafetyPointButton1-v0': {
+        'cost': 0.15,
+    },
+    'SafetyCarButton1-v0': {
+        'cost': 0.15,
+    },
     'SafetyPointCircle1-v0': {
         'cost': 0.15,
     },
@@ -130,7 +147,6 @@ ENVTAGLEFTMARGINS = {
         'return': 0.16,
     },
     'SafetySwimmerVelocity-v1': {
-        'cost': 0.15,
         'return': 0.15,
     },
     'SafetyWalker2dVelocity-v1': {
@@ -293,15 +309,6 @@ def get_statistics(envs: Sequence[str], tags: Sequence[str], algs: Sequence[str]
                     'value': mean_value,
                     'seed': seed,
                 })
-                if tag == 'cost':
-                    adjusted_area = _calculate_convergence_area(df['value'], mean_value, window_length)
-                    data.append({
-                        'env': env,
-                        'alg': alg,
-                        'tag': tag + '_adjusted_area',
-                        'value': adjusted_area,
-                        'seed': seed,
-                    })
     keys = data[0].keys()
     data = {k: [d[k] for d in data] for k in keys}
     df = (
@@ -313,39 +320,69 @@ def get_statistics(envs: Sequence[str], tags: Sequence[str], algs: Sequence[str]
     os.makedirs(RESULT_PATH, exist_ok=True)
     df.to_csv(os.path.join(RESULT_PATH, 'statistics.csv'), float_format='%.2f', index=False)
 
-def _calculate_convergence_area(values, mean_value, window_length):
-    rolling_mean = np.array(values.rolling(window=window_length, min_periods=1).mean())
-    
-    max_index = np.argmax(rolling_mean)
-    
-    if max_index == len(rolling_mean) - 1:
-        return np.inf
+def get_table():
+    df = pd.read_csv(os.path.join(RESULT_PATH, 'statistics.csv'))
+    envs = sorted(df['env'].unique())
+    algs = ALGLABELS.keys()
 
-    remaining_values = rolling_mean[max_index:]
+    pivot_df = df.pivot_table(index=['alg', 'env'], columns='tag', values=['mean', 'ci'])
 
-    remaining_indices = np.arange(len(remaining_values))
-    target_indices = np.linspace(0, len(remaining_values) - 1, len(rolling_mean))
+    pivot_df.columns = [f'{col[1]}_{col[0]}' for col in pivot_df.columns]
+    pivot_df = pivot_df.reset_index()
 
-    interp_kind = 'cubic' if len(remaining_values) > 3 else 'linear'
-    
-    f = interpolate.interp1d(
-        remaining_indices, 
-        remaining_values,
-        kind=interp_kind,
-        bounds_error=False, 
-        fill_value="extrapolate"
-    )
-    
-    stretched_values = f(target_indices)
-    
-    adjusted_values = stretched_values - mean_value
-    
-    adjusted_area = np.sum(adjusted_values)
-    
-    if adjusted_area <= 0:
-        return np.inf
-        
-    return adjusted_area
+    latex_table = r'''\begin{table}[ht]
+    \centering
+    \caption{Average cost and return in the last 10\% iterations}
+    \resizebox{\textwidth}{!}{
+    \begin{tabular}{lcccccc}
+        \toprule
+'''
+    tab = '    '
+
+    for i in range(0, len(envs), 3):
+        group_envs = envs[i:min(i + 3, len(envs))]
+
+        latex_table += tab * 2
+        for env in group_envs:
+            latex_table += f' & \multicolumn{{2}}{{c}}{{{ENVTITLES[env]}}}'
+        latex_table += ' \\\\\n'
+
+        latex_table += tab * 2
+        for j in range(len(group_envs)):
+            latex_table += f'\cmidrule(lr){{{j * 2 + 2}-{j * 2 + 3}}} '
+        latex_table += '\n'
+
+        latex_table += tab * 2 + 'Algorithm'
+        latex_table += ' & Cost & Return' * len(group_envs)
+        latex_table += ' \\\\\n'
+        latex_table += tab * 2 + '\midrule\n'
+
+        for alg in algs:
+            latex_table += tab * 2 + ALGLABELS[alg]
+            for env in group_envs:
+                cost_row = pivot_df[(pivot_df['alg'] == alg) & (pivot_df['env'] == env)]
+                cost_mean = cost_row['cost_mean'].values[0]
+                cost_ci = cost_row['cost_ci'].values[0]
+                cost_str = f'${cost_mean:.2f}\\pm{cost_ci:.2f}$'
+
+                ret_row = pivot_df[(pivot_df['alg'] == alg) & (pivot_df['env'] == env)]
+                ret_mean = ret_row['return_mean'].values[0]
+                ret_ci = ret_row['return_ci'].values[0]
+                ret_str = f'${ret_mean:.2f}\\pm{ret_ci:.2f}$'
+
+                latex_table += f' & {cost_str} & {ret_str}'
+            latex_table += ' \\\\\n'
+
+        if i + 3 < len(envs):
+            latex_table += tab * 2 + '\midrule\n'
+
+    latex_table += r'''        \bottomrule
+    \end{tabular}
+    }
+\end{table}'''
+
+    with open('table.tex', 'w') as f:
+        f.write(latex_table)
 
 def plot_cost_return_scatter(envs: Sequence[str], algs: Sequence[str], normalize_by='PPO'):
     stats_file = os.path.join(RESULT_PATH, 'statistics.csv')
@@ -356,7 +393,6 @@ def plot_cost_return_scatter(envs: Sequence[str], algs: Sequence[str], normalize
     df = pd.read_csv(stats_file)
     df = df[df['env'].isin(envs) & df['alg'].isin(algs)]
 
-
     for env in envs:
         for tag in ['cost', 'return']:
             if not ((df['env'] == env) & (df['alg'] == normalize_by) & (df['tag'] == tag)).any():
@@ -364,30 +400,43 @@ def plot_cost_return_scatter(envs: Sequence[str], algs: Sequence[str], normalize
                 
             baseline = df.loc[(df['env'] == env) & (df['alg'] == normalize_by) & (df['tag'] == tag), 'mean'].values[0]
             if baseline == 0:
-                continue
+                assert False, f"Baseline value for {normalize_by} in {env} is zero."
                 
             df.loc[(df['env'] == env) & (df['tag'] == tag), 'mean'] /= baseline
-            df.loc[(df['env'] == env) & (df['tag'] == tag), 'mean'] = np.log(df.loc[(df['env'] == env) & (df['tag'] == tag), 'mean'])
 
-    _, ax = plt.subplots(figsize=(10, 8))
-    
+    sns.set_theme(style='dark')
+    _, ax = plt.subplots(figsize=(6, 5))
     for alg in algs:
         if alg == normalize_by:
             continue
-        ax.scatter(df.loc[(df['alg'] == alg) &(df['tag'] == 'cost'), 'mean'].mean(),  
-                    df.loc[(df['alg'] == alg) &(df['tag'] == 'return'), 'mean'].mean(),
-                    marker='*', 
-                    s=200, 
-                    label=alg)
-    ax.set_xlim(ax.get_xlim()[::-1])
-
-    plt.xlabel(f'Normalized log cost', fontsize=12)
-    plt.ylabel(f'Normalized log return', fontsize=12)
-    plt.title(f'Algorithm Performance Comparison(relative to {normalize_by})', fontsize=14)
-    plt.grid(True, linestyle='--', alpha=0.3)
-    plt.legend(loc='best',fontsize=10)
-
-    plt.savefig(os.path.join(RESULT_PATH, f'return_cost_scatter_log.{EXTENSION}'), dpi=300)
+        label, color = ALGLABELCOLORS[alg]
+        cost = df.loc[(df['alg'] == alg) & (df['tag'] == 'cost'), 'mean']
+        ret = df.loc[(df['alg'] == alg) & (df['tag'] == 'return'), 'mean']
+        cost_mean = cost.mean()
+        ret_mean = ret.mean()
+        cost_ci = 1.96 * cost.std() / len(cost)
+        ret_ci = 1.96 * ret.std() / len(ret)
+        ax.errorbar(
+            cost_mean,
+            ret_mean,
+            xerr=cost_ci,
+            yerr=ret_ci,
+            label=label,
+            color=color,
+            fmt='o',
+            markersize=6,
+            elinewidth=1.2,
+            capsize=4,
+            capthick=1.2,
+        )
+    ax.set_xlim(ax.get_xlim()[1], 0)
+    ax.set_ylim(ax.get_ylim()[0], 0.8)
+    ax.set_xlabel('Normalized cost')#, fontsize=12)
+    ax.set_ylabel('Normalized return')#, fontsize=12)
+    plt.grid()#True, linestyle='--', alpha=1, linewidth=1.5)
+    plt.legend(loc='lower left')#, fontsize=10)
+    plt.tight_layout()
+    plt.savefig(os.path.join(FIGURE_PATH, f'return_cost_scatter.{EXTENSION}'), dpi=300)
 
 def mean_confidence_interval(group, include_groups=False):
     mean = group['value'].mean()
@@ -396,60 +445,92 @@ def mean_confidence_interval(group, include_groups=False):
     ci = 1.96 * std / np.sqrt(n) if n > 1 else 0  # 0.95 confidence interval
     return pd.Series({'mean': mean, 'ci': ci})
 
-def plot_cost_convergence_bargraph(envs: Sequence[str], algs: Sequence[str]):
-    stats_file = os.path.join(RESULT_PATH, 'statistics.csv')
-    if not os.path.exists(stats_file):
-        print(f"Statistics file {stats_file} not found. Please run get_statistics() first.")
-        return
-    
-    df = pd.read_csv(stats_file)
-    df = df[df['env'].isin(envs) & df['alg'].isin(algs)]
-    
-    sns.set_theme(style='whitegrid')
-    plt.figure(figsize=(14, 8))
-    
-    tag_type = 'cost_adjusted_area'
-    tag_data = df[df['tag'] == tag_type].copy()
-    
-    finite_max = tag_data[tag_data['mean'] != np.inf]['mean'].max() if any(tag_data['mean'] != np.inf) else 1000
-    
-    tag_data.loc[tag_data['mean'] == np.inf, 'mean'] = finite_max * 1.2
-    
-    ax = sns.barplot(x='env', y='mean', hue='alg', data=tag_data)
-    
-    plt.axhline(y=finite_max * 1.2, color='red', linestyle='--', alpha=0.7)
-    
-    x_max = len(tag_data['env'].unique()) - 1 + 0.5  
-    plt.text(x_max, finite_max * 1.2, '∞', color='red', ha='right', va='bottom', fontsize=16)
-    
-    plt.title('Cost Convergence Area by Environment and Algorithm', fontsize=16)
-    plt.xlabel('Environment', fontsize=14)
-    plt.ylabel('Adjusted Area (larger is worse)', fontsize=14)
-    plt.xticks(rotation=45, ha='right')
-    
-    import matplotlib.ticker as ticker
-    def thousands(x, pos):
-        return f'{x/1000:.1f}K'
-    ax.yaxis.set_major_formatter(ticker.FuncFormatter(thousands))
-    
-    plt.legend(title='Algorithm', bbox_to_anchor=(1.05, 1), loc='upper left')
-    
-    plt.tight_layout()
-    plt.savefig(os.path.join(RESULT_PATH, f'{tag_type}_bargraph.{EXTENSION}'), dpi=300)
-    plt.close()
-   
 def plot_cost_observation(
-        data_path, 
+        data_dir: str, 
         x_range: tuple = (-2, 2),
         y_range: tuple = (-2, 2),
-        save_path: str = f'heatmap.{EXTENSION}',
+        epoch_list: Sequence = [5, 10, 20, 50, 100],
+        seed: int = 42,
+        # figsize_single: tuple = (8, 6),
+        figsize_combined: tuple = (24, 5),
     ):
-    data = np.load(data_path)
-    values_c = data['values_c']
-    plt.figure(figsize=(8, 6))
-    plt.imshow(values_c, extent=(x_range[0], x_range[1], y_range[0], y_range[1]), origin='lower')
-    plt.colorbar(label='Critic Value')
-    plt.title('Critic Value Heatmap')
-    plt.xlabel('X Position')
-    plt.ylabel('Y Position')
-    plt.savefig(save_path)
+    epoch_data = {}
+    
+    global_max = float('-inf')
+    
+    for epoch in epoch_list:
+        try:
+            data_path = os.path.join(data_dir, f'saved_obs_epoch-{epoch}_{seed}.npz')
+            data = np.load(data_path)
+            values_c = data['values_c']
+            
+            epoch_data[epoch] = values_c 
+            
+            # global_min = min(global_min, values_c.min())
+            global_max = max(global_max, values_c.max())
+            
+        except (FileNotFoundError, ValueError) as e:
+            print(f"Unable to load data for Epoch {epoch}: {e}")
+    
+    if not epoch_data:
+        print("No valid data to plot")
+        return
+    global_min = 0.2 - global_max
+    
+    if len(epoch_data) > 1:
+        rows = 1
+        cols = len(epoch_data) 
+        
+        fig, axs = plt.subplots(rows, cols, figsize=figsize_combined)
+        
+        if not isinstance(axs, np.ndarray):
+            axs = np.array([axs])
+        
+        dummy_data = np.array([[global_min, global_max], [global_min, global_max]])
+        
+        for idx, (epoch, values_c) in enumerate(sorted(epoch_data.items())):
+            if idx >= cols:
+                print(f"Warning: Can only display the first {cols} epochs")
+                break
+                
+            ax = axs[idx] if len(axs.shape) == 1 else axs[0, idx]
+            
+            im = ax.imshow(values_c, extent=(x_range[0], x_range[1], y_range[0], y_range[1]), 
+                          origin='lower', cmap='coolwarm', vmin=global_min, vmax=global_max)
+                
+            ax.contour(
+                np.linspace(x_range[0], x_range[1], values_c.shape[1]),
+                np.linspace(y_range[0], y_range[1], values_c.shape[0]),
+                values_c,
+                levels=[0.1],
+                colors='black',
+                linewidths=1.5
+            )
+            # ax.clabel(contour, inline=True, fontsize=10, fmt='%.1f')
+            
+            ax.set_title(f'Epoch {epoch}', fontsize=14)
+            ax.set_xlabel('X Position', fontsize=12)
+            if idx == 0: 
+                ax.set_ylabel('Y Position', fontsize=12)
+            ax.set_xlim(x_range)
+            ax.set_ylim(y_range)
+            ax.set_aspect('equal')
+            ax.grid(False)
+            
+            ax.tick_params(axis='both', which='major', labelsize=10)
+        
+        plt.tight_layout(rect=[0, 0, 0.95, 0.95])
+        
+        dummy_ax = fig.add_axes([0, 0, 0, 0]) 
+        dummy_im = dummy_ax.imshow(dummy_data, cmap='coolwarm', vmin=global_min, vmax=global_max)
+        dummy_ax.set_visible(False)
+        
+        cbar_ax = fig.add_axes([0.96, 0.15, 0.01, 0.7]) 
+        cbar = fig.colorbar(dummy_im, cax=cbar_ax)
+        cbar.set_label('Critic Value', fontsize=12)
+        cbar.ax.tick_params(labelsize=10) 
+            
+        plt.savefig(os.path.join(data_dir, f'heatmap_all_epochs_{seed}.{EXTENSION}'), dpi=300)
+        plt.close()
+        
+    return len(epoch_data)

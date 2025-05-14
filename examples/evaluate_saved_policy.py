@@ -37,10 +37,26 @@ if __name__ == '__main__':
     evaluator.load_saved(
         save_dir=LOG_DIR,
         model_name=last_pt_file.name,
-        camera_name='track',
-        width=256,
-        height=256,
+        camera_name='3',
+        # camera_id='track',
+        width=1024,
+        height=1024,
     )
-    evaluator.render(num_episodes=10)
-    # evaluator.evaluate(num_episodes=1)
+
+    evaluator.render(num_episodes=1)
+
+    # seed = 42
+    # if not os.path.exists(LOG_DIR):
+    #     raise ValueError(f"Checkpoint directory {LOG_DIR} does not exist.")
+    # saved_dir = os.path.join(LOG_DIR, 'feasible_value')
+    # os.makedirs(saved_dir, exist_ok=True)
+    # for item in scan_dir:
+    #     evaluator.load_saved(
+    #         save_dir=LOG_DIR,
+    #         model_name=item.name,
+    #         camera_name='track',
+    #         width=256,
+    #         height=256,
+    #     )
+    #     evaluator.collect_obs(seed=seed,save_path=os.path.join(saved_dir, f'saved_obs_{item.name.split(".")[0]}_{seed}.npz'))
     scan_dir.close()

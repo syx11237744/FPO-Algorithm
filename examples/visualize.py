@@ -1,7 +1,14 @@
 import os
-
+import numpy as np
+import matplotlib.pyplot as plt
 import omnisafe.utils.path as path
-from omnisafe.utils.visualizer import extract_training_data, get_statistics, draw_cost_return_scatter,plot_threshold_bargraph
+from omnisafe.utils.visualizer import \
+    extract_training_data, get_statistics, get_table, \
+    plot_cost_return_scatter, plot_training_curve, plot_legend
+
+
+plt.rcParams['pdf.fonttype'] = 42
+plt.rcParams['ps.fonttype'] = 42
 
 envs = [
     'SafetyPointGoal1-v0',
@@ -23,9 +30,11 @@ envs = [
 algs = [
     'PPO',
     'CPO',
+    'PCPO',
+    'FOCOPS',
     'RCPO',
     'PPOLag',
-    'FOCOPS',
+    'TRPOPID',
     'P3O',
     'FPO',
 ]
@@ -35,7 +44,10 @@ tags = [
     'return',
 ]
 
-extract_training_data(envs, algs, tags)
-get_statistics(envs, tags)
-plot_threshold_bargraph(os.path.join(path.RESULT_PATH, 'convergence_statistics.csv'))
-draw_cost_return_scatter(os.path.join(path.RESULT_PATH, 'statistics.csv'), normalize_by='PPOLag')
+# extract_training_data(envs, algs, tags)
+# get_statistics(envs, tags, algs)
+# get_table()
+# step = np.linspace(int(2e4), int(1e7), 200)
+# plot_training_curve(envs, algs, tags, step)
+# plot_legend()
+# plot_cost_return_scatter(envs, algs)
