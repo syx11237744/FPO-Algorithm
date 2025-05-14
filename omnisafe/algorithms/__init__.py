@@ -64,7 +64,6 @@ from omnisafe.algorithms.on_policy import (
     TRPOSaute,
     TRPOSimmerPID,
     FPO,
-    FPONG,
 )
 
 
