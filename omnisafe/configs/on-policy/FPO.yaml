@@ -13,6 +13,10 @@ defaults:
     parallel: 1
     # total number of steps to train
     total_steps: 10000000
+    # algo configs, put here for parsing in terminal
+    feasibility_threshold: 0.1
+    weight_schedule: exp
+    feasibility_type: cdf
   # algorithm configurations
   algo_cfgs:
     # number of steps to update the policy
@@ -61,7 +65,6 @@ defaults:
     penalty_coef: 0.0
     # use cost
     use_cost: True
-    feasibility_threshold: 0.1
   # logger configurations
   logger_cfgs:
     # use wandb for logging

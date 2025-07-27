@@ -21,6 +21,7 @@ class FPOBuffer(OnPolicyBuffer):
         penalty_coefficient: float = 0,
         standardized_adv_r: bool = False,
         standardized_adv_c: bool = False,
+        feasibility_type: str = 'cdf',
         device: torch.device = DEVICE_CPU,
     ) -> None:
         """Initialize an instance of :class:`FPOBuffer`."""
@@ -43,6 +44,7 @@ class FPOBuffer(OnPolicyBuffer):
         self.data['adv_rc'] = torch.zeros((size,), dtype=torch.float32, device=device)
         self.data['value_rc'] = torch.zeros((size,), dtype=torch.float32, device=device)
         self.data['target_value_rc'] = torch.zeros((size,), dtype=torch.float32, device=device)
+        self._feasibility_type = feasibility_type
         assert advantage_estimator == "gae", 'FPOBuffer only supports GAE advantage estimator.'
 
     def store(self, **data: torch.Tensor) -> None:
@@ -101,27 +103,33 @@ class FPOBuffer(OnPolicyBuffer):
             rewards,
             lam=self._lam,
         )
-
-        adv_c, target_value_c = self._process_segments(
-            path_length=path_length,
-            costs=costs,
-            values=values_c,
-            segment_positions=self.cost_one_positions,
-        )
-
-        adv_rc, target_value_rc = self._process_segments(
-            path_length=path_length,
-            costs=1 - costs,
-            values=values_rc,
-            segment_positions=self.cost_zero_positions,
-        )
-
         self.data['adv_r'][path_slice] = adv_r
         self.data['target_value_r'][path_slice] = target_value_r
+
+        if self._feasibility_type == 'cdf':
+            adv_c, target_value_c = self._process_segments(
+                path_length=path_length,
+                costs=costs,
+                values=values_c,
+                segment_positions=self.cost_one_positions,
+            )
+            adv_rc, target_value_rc = self._process_segments(
+                path_length=path_length,
+                costs=1 - costs,
+                values=values_rc,
+                segment_positions=self.cost_zero_positions,
+            )
+            self.data['adv_rc'][path_slice] = adv_rc
+            self.data['target_value_rc'][path_slice] = target_value_rc
+        elif self._feasibility_type == 'cvf':
+            adv_c, target_value_c = self._calculate_adv_and_value_targets(
+                values_c,
+                costs,
+                lam=self._lam_c,
+                gamma=self._cost_gamma,
+            )
         self.data['adv_c'][path_slice] = adv_c
         self.data['target_value_c'][path_slice] = target_value_c
-        self.data['adv_rc'][path_slice] = adv_rc
-        self.data['target_value_rc'][path_slice] = target_value_rc
 
         self.path_start_idx = self.ptr
         self.cost_one_positions = []

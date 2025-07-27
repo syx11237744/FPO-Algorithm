@@ -121,12 +121,15 @@ class FPO(PPO):
             penalty_coefficient=self._cfgs.algo_cfgs.penalty_coef,
             standardized_adv_r=self._cfgs.algo_cfgs.standardized_rew_adv,
             standardized_adv_c=self._cfgs.algo_cfgs.standardized_cost_adv,
+            feasibility_type=self._cfgs.train_cfgs.feasibility_type,
             num_envs=self._cfgs.train_cfgs.vector_env_nums,
             device=self._device,
         )
         self._lagrange_in_region: Lagrange = Lagrange(**self._cfgs.lagrange_in_cfgs)
         self._lagrange_out_region: Lagrange = Lagrange(**self._cfgs.lagrange_out_cfgs)
-        self._feasibility_threshold = self._cfgs.algo_cfgs.feasibility_threshold
+        self._feasibility_threshold = self._cfgs.train_cfgs.feasibility_threshold
+        self._weight_schedule = self._cfgs.train_cfgs.weight_schedule
+        self._feasibility_type = self._cfgs.train_cfgs.feasibility_type
 
     def _init_log(self) -> None:
         super()._init_log()
@@ -156,6 +159,8 @@ class FPO(PPO):
         self._logger.register_key('Train/penalty_term_out')
         self._logger.register_key('Metrics/InRegionLagrangeMultiplier')
         self._logger.register_key('Metrics/OutRegionLagrangeMultiplier')
+        for vc_step in self._env._vc_steps:
+            self._logger.register_key(f'Freq/value_c_lt_0.1_{vc_step}')
 
     def _update(self) -> None:
         data = self._buf.get()
@@ -189,11 +194,18 @@ class FPO(PPO):
 
         in_region_multiplier = self._lagrange_in_region.lagrangian_multiplier.item()
         out_region_multiplier = self._lagrange_out_region.lagrangian_multiplier.item()
-        weight = torch.clamp((1 - target_value_c / self._feasibility_threshold), 0, 1) ** in_region_multiplier
+        if self._weight_schedule == 'exp':
+            weight = torch.clamp((1 - target_value_c / self._feasibility_threshold), 0, 1) ** in_region_multiplier
+        elif self._weight_schedule == 'lin':
+            weight = torch.clamp((1 - target_value_c / self._feasibility_threshold), 0, 1)
+        elif self._weight_schedule == 'fix':
+            weight = 0.5
         weight = weight + (1 - weight) / (1 + out_region_multiplier)
         adv_in = weight * adv_r - (1 - weight) * adv_c
         adv_out = (adv_r - out_region_multiplier * adv_c) / (1 + out_region_multiplier)
-        adv = torch.where(vio, adv_rc, torch.where(fea, adv_in, adv_out))
+        adv = torch.where(fea, adv_in, adv_out)
+        if self._feasibility_type == 'cdf':
+            adv = torch.where(vio, adv_rc, adv)
         adv = (adv - adv.mean()) / (adv.std() + 1e-8)
 
         data.update({'fea': fea, 'adv': adv})

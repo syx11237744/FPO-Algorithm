@@ -20,6 +20,7 @@ class VectorFPOBuffer(FPOBuffer):
         penalty_coefficient: float,
         standardized_adv_r: bool,
         standardized_adv_c: bool,
+        feasibility_type: str = 'cdf',
         num_envs: int = 1,
         device: torch.device = DEVICE_CPU,
     ) -> None:
@@ -41,6 +42,7 @@ class VectorFPOBuffer(FPOBuffer):
                 lam_c=lam_c,
                 advantage_estimator=advantage_estimator,
                 penalty_coefficient=penalty_coefficient,
+                feasibility_type=feasibility_type,
                 device=device,
             )
             for _ in range(num_envs)

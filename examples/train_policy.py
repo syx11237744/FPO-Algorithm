@@ -64,6 +64,23 @@ if __name__ == '__main__':
         metavar='SEED',
         help='random seed for training',
     )
+    parser.add_argument(
+        '--feasibility_threshold',
+        type=float,
+        default=0.1,
+    )
+    parser.add_argument(
+        '--weight_schedule',
+        type=str,
+        default='exp',
+        help='exp/lin/fix',
+    )
+    parser.add_argument(
+        '--feasibility_type',
+        type=str,
+        default='cdf',
+        help='cdf / cvf',
+    )
     args, unparsed_args = parser.parse_known_args()
     keys = [k[2:] for k in unparsed_args[0::2]]
     values = list(unparsed_args[1::2])

@@ -184,6 +184,44 @@ def extract_training_data(
                     result_file = os.path.join(result_dir, result_file_name)
                     df.to_csv(result_file, index=False)
 
+def extract_training_data_with_type(
+    envs: Sequence[str],
+    algs: Sequence[str],
+    tags: Sequence[str],
+):
+    for env in envs:
+        for alg in algs:
+            env_alg_dir = os.path.join(LOG_PATH, f'{alg}-' + '{' + env + '}')
+            for log_dir_name in os.listdir(env_alg_dir):
+                log = pd.read_csv(os.path.join(env_alg_dir, log_dir_name, 'progress.csv'))
+                step = epoch_to_step(log['Train/Epoch'])
+                
+                # Parse log_dir_name to extract seed and possible type
+                parts = log_dir_name.split('-')
+                seed = str(int(parts[1]))  # Extract seed number
+                
+                # Check if there's a type suffix (anything after the timestamp)
+                # Format: seed-XXX-YYYY-MM-DD-HH-MM-SS[-type]
+                # import pdb; pdb.set_trace()
+                if len(parts) > 8:  # More than 6 parts means there's a type suffix
+                    type_suffix = '-'.join(parts[8:])  # Join all parts after timestamp
+                    effective_alg = f"{alg}-{type_suffix}"
+                else:
+                    effective_alg = alg
+                
+                for tag in tags:
+                    df = pd.DataFrame(
+                        {
+                            'step': step,
+                            'value': log[TAGLOGNAMES[tag]],
+                        }
+                    )
+                    result_dir = os.path.join(RESULT_PATH, env, tag)
+                    os.makedirs(result_dir, exist_ok=True)
+                    result_file_name = '_'.join([effective_alg, seed]) + '.csv'
+                    result_file = os.path.join(result_dir, result_file_name)
+                    df.to_csv(result_file, index=False)
+
 
 def plot_training_curve(envs: Sequence[str], algs: Sequence[str], tags: Sequence[str], step: np.ndarray, magnify_last: float = 0.1):
     save_dir = os.path.join(FIGURE_PATH, 'training_curve')
@@ -319,6 +357,50 @@ def get_statistics(envs: Sequence[str], tags: Sequence[str], algs: Sequence[str]
     )
     os.makedirs(RESULT_PATH, exist_ok=True)
     df.to_csv(os.path.join(RESULT_PATH, 'statistics.csv'), float_format='%.2f', index=False)
+    return df
+
+def get_statistics_with_type(envs: Sequence[str], tags: Sequence[str], algs: Sequence[str], last: float = 0.1):
+    data = []
+    for env in envs:
+        for tag in tags:
+            tag_dir = os.path.join(RESULT_PATH, env, tag)
+            for tag_file_name in os.listdir(tag_dir):
+                tag_file = os.path.join(tag_dir, tag_file_name)
+                df = pd.read_csv(tag_file)
+                
+                # Parse filename to extract algorithm and seed
+                file_base = tag_file_name[:-4]  # Remove .csv extension
+                parts = file_base.split('_')
+                seed = parts[-1]  # Last part is always seed
+                alg = '_'.join(parts[:-1])  # Everything except the last part is algorithm
+                
+                if alg not in algs:
+                    continue
+                
+                last_n = int(len(df) * last)
+                mean_value = np.mean(df['value'][-last_n:])
+
+                data.append({
+                    'env': env,
+                    'alg': alg,  # This now includes type suffix if present
+                    'tag': tag,
+                    'value': mean_value,
+                    'seed': seed,
+                })
+    
+    if not data:
+        return pd.DataFrame()
+        
+    keys = data[0].keys()
+    data = {k: [d[k] for d in data] for k in keys}
+    df = (
+        pd.DataFrame(data)
+        .groupby(['env', 'alg', 'tag'])  # Group by full algorithm name (including type)
+        .apply(mean_confidence_interval, include_groups=False)
+        .reset_index()
+    )
+    os.makedirs(RESULT_PATH, exist_ok=True)
+    df.to_csv(os.path.join(RESULT_PATH, 'statistics_type.csv'), float_format='%.2f', index=False)
     return df
 
 def get_table():

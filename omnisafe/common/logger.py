@@ -96,7 +96,10 @@ class Logger:  # pylint: disable=too-many-instance-attributes
         relpath = hms_time
 
         if seed is not None:
-            relpath = f'seed-{str(seed).zfill(3)}-{relpath}'
+            if config.logger_cfgs.task_description is not None:
+                relpath = f'seed-{str(seed).zfill(3)}-{relpath}-{config.logger_cfgs.task_description}'
+            else:
+                relpath = f'seed-{str(seed).zfill(3)}-{relpath}'
 
         self._hms_time: str = hms_time
         self._log_dir: str = os.path.join(output_dir, exp_name, relpath)

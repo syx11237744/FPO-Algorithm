@@ -3,14 +3,22 @@ from __future__ import annotations
 from typing import Any
 
 import torch
+import numpy as np
 from rich.progress import track
 
 from omnisafe.adapter import OnPolicyAdapter
 from omnisafe.models.actor_critic import ConstraintActorCritic
 from omnisafe.common.buffer import VectorFPOBuffer
 from omnisafe.common.logger import Logger
+from collections import deque
 
 class FPOAdapter(OnPolicyAdapter):
+    def __init__(self, env_id, num_envs, seed, cfgs):
+        super().__init__(env_id, num_envs, seed, cfgs)
+
+        self._vc_steps = [0, 20, 40]
+        self._vc_flags = [deque(maxlen=max(self._vc_steps) + 1) for _ in range(self._env.num_envs)]
+    
     def rollout(  # pylint: disable=too-many-locals
         self,
         steps_per_epoch: int,
@@ -33,6 +41,9 @@ class FPOAdapter(OnPolicyAdapter):
         """
         self._reset_log()
 
+        for dq in self._vc_flags:
+            dq.clear()
+
         obs, _ = self.reset()
         for step in track(
             range(steps_per_epoch),
@@ -41,15 +52,16 @@ class FPOAdapter(OnPolicyAdapter):
             act, value_r, value_c, value_rc, logp = agent.step(obs)
             next_obs, reward, cost, terminated, truncated, info = self.step(act)
 
-            # clip (0, 1)
-            # value_c = torch.clamp(value_c, 0, 1)
-            # value_rc = torch.clamp(value_rc, 0, 1)
+            flag_lt_01 = (value_c.detach() < 0.1).cpu().numpy()
+            for i in range(self._env.num_envs):
+                self._vc_flags[i].append(bool(flag_lt_01[i]))
 
             # tight clip
-            value_c[cost == 1] = 1.
-            value_c[cost == 0] = torch.clamp(value_c[cost == 0], 0., self._cfgs.algo_cfgs.cost_gamma)
-            value_rc[cost == 0] = 1.
-            value_rc[cost == 1] = torch.clamp(value_rc[cost == 1], 0., self._cfgs.algo_cfgs.cost_gamma)
+            if self._cfgs.train_cfgs.feasibility_type == 'cdf':
+                value_c[cost == 1] = 1.
+                value_c[cost == 0] = torch.clamp(value_c[cost == 0], 0., self._cfgs.algo_cfgs.cost_gamma)
+                value_rc[cost == 0] = 1.
+                value_rc[cost == 1] = torch.clamp(value_rc[cost == 1], 0., self._cfgs.algo_cfgs.cost_gamma)
 
             self._log_value(reward=reward, cost=cost, info=info)
 
@@ -68,6 +80,15 @@ class FPOAdapter(OnPolicyAdapter):
                 value_rc=value_rc,
                 logp=logp,
             )
+
+            for i in range(self._env.num_envs):
+                if cost[i].item() == 1:
+                    for vc_step in self._vc_steps:
+                        if len(self._vc_flags[i]) > vc_step:
+                            dp_list = list(self._vc_flags[i])
+                            logger.store({
+                                f'Freq/value_c_lt_0.1_{vc_step}': np.mean(dp_list[-vc_step - 1:]),
+                            })
 
             obs = next_obs
             epoch_end = step >= steps_per_epoch - 1
@@ -102,6 +123,8 @@ class FPOAdapter(OnPolicyAdapter):
                         self._ep_ret[idx] = 0.0
                         self._ep_cost[idx] = 0.0
                         self._ep_len[idx] = 0.0
+
+                        self._vc_flags[idx].clear()
 
                     buffer.finish_path(last_value_r, last_value_c, last_value_rc, idx)
 
