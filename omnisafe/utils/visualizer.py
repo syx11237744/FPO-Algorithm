@@ -288,7 +288,7 @@ def plot_legend():
     plt.close()
 
 
-def get_statistics(envs: Sequence[str], tags: Sequence[str], algs: Sequence[str], last: float = 0.1, window_length: int = 50):
+def get_statistics(envs: Sequence[str], tags: Sequence[str], algs: Sequence[str], last: float = 0.1):
     data = []
     for env in envs:
         for tag in tags:
@@ -319,6 +319,7 @@ def get_statistics(envs: Sequence[str], tags: Sequence[str], algs: Sequence[str]
     )
     os.makedirs(RESULT_PATH, exist_ok=True)
     df.to_csv(os.path.join(RESULT_PATH, 'statistics.csv'), float_format='%.2f', index=False)
+    return df
 
 def get_table():
     df = pd.read_csv(os.path.join(RESULT_PATH, 'statistics.csv'))
