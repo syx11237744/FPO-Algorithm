@@ -1,16 +1,17 @@
 import os
 from omnisafe.utils.path import RESULT_PATH
-from omnisafe.utils.visualizer import extract_training_data, extract_training_data_with_type, get_statistics_with_type, ENVTITLES
+from omnisafe.utils.visualizer import extract_training_data_with_type, get_statistics_with_type, ENVTITLES
 
 
 envs = [
     'SafetyPointCircle1-v0',
     'SafetyPointButton1-v0',
-    # 'SafetyCarGoal1-v0',
-    # 'SafetyCarPush1-v0',
-    # 'SafetyAntVelocity-v1',
-    # 'SafetyHopperVelocity-v1',
-    # 'SafetySwimmerVelocity-v1',
+    'SafetyCarGoal1-v0',
+    'SafetyCarPush1-v0',
+    'SafetyAntVelocity-v1',
+    'SafetyHalfCheetahVelocity-v1',
+    'SafetyHopperVelocity-v1',
+    'SafetySwimmerVelocity-v1',
 ]
 
 extract_algs = [

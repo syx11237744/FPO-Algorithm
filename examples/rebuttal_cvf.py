@@ -19,16 +19,14 @@ extract_algs = [
 ]
 
 algs = [
-    'FPO-fea_thresh_0.05',
+    'FPO-cvf',
     'FPO',
-    'FPO-fea_thresh_0.2',
 ]
 
 
 ALGNAMES = {
-    'FPO-fea_thresh_0.05': '$\epsilon$=0.05',
-    'FPO': '$\epsilon$=0.1',
-    'FPO-fea_thresh_0.2': '$\epsilon$=0.2',
+    'FPO-cvf': 'CVF',
+    'FPO': 'CDF',
     
 }
 
@@ -96,5 +94,5 @@ for alg in algs:
         avg_row.append(f'{avg_val:.2f}')
 markdown_lines.append('|' + '|'.join(avg_row) + '|')
 
-with open(os.path.join(RESULT_PATH, 'fea_thresh.md'), 'w') as f:
+with open(os.path.join(RESULT_PATH, 'cvf.md'), 'w') as f:
     f.write('\n'.join(markdown_lines))

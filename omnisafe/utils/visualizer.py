@@ -334,7 +334,7 @@ def get_statistics(envs: Sequence[str], tags: Sequence[str], algs: Sequence[str]
             for tag_file_name in os.listdir(tag_dir):
                 tag_file = os.path.join(tag_dir, tag_file_name)
                 df = pd.read_csv(tag_file)
-                alg, seed = tag_file_name.split('.')[0].split('_')
+                alg, seed = tag_file_name.rsplit('.', 1)[0].split('_', 1)
                 if alg not in algs:
                     continue
                 last_n = int(len(df) * last)
