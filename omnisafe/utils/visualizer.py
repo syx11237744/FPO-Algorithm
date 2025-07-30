@@ -1,11 +1,10 @@
 import os
-from typing import Sequence
+from typing import Optional, Sequence
 
 import numpy as np
 import pandas as pd
 import seaborn as sns
 import matplotlib.pyplot as plt
-from scipy import interpolate
 from matplotlib.lines import Line2D
 from mpl_toolkits.axes_grid1.inset_locator import inset_axes
 from matplotlib.patches import Rectangle, ConnectionPatch
@@ -18,6 +17,9 @@ EXTENSION = 'pdf'
 TAGLOGNAMES = {
     'cost': 'Metrics/EpCost',
     'return': 'Metrics/EpRet',
+    'error_0': 'Freq/value_c_lt_0.1_0',
+    'error_20': 'Freq/value_c_lt_0.1_20',
+    'error_40': 'Freq/value_c_lt_0.1_40',
 }
 
 TAGLABELS = {
@@ -188,6 +190,7 @@ def extract_training_data_with_type(
     envs: Sequence[str],
     algs: Sequence[str],
     tags: Sequence[str],
+    alg_type: Optional[str] = None,
 ):
     for env in envs:
         for alg in algs:
@@ -202,7 +205,9 @@ def extract_training_data_with_type(
                 
                 # Check if there's a type suffix (anything after the timestamp)
                 # Format: seed-XXX-YYYY-MM-DD-HH-MM-SS[-type]
-                # import pdb; pdb.set_trace()
+                if alg_type is not None and '-'.join(parts[8:]) != alg_type:
+                    continue
+
                 if len(parts) > 8:  # More than 6 parts means there's a type suffix
                     type_suffix = '-'.join(parts[8:])  # Join all parts after timestamp
                     effective_alg = f"{alg}-{type_suffix}"
