@@ -1,16 +1,23 @@
 import os
+
 from omnisafe.utils.path import RESULT_PATH
-from omnisafe.utils.visualizer import extract_training_data, get_statistics, ENVTITLES
+from omnisafe.utils.visualizer import extract_training_data, get_statistics, normalize_by, ENVTITLES
 
 
 envs = [
-    'SafetyPointCircle1-v0',
+    'SafetyPointGoal1-v0',
+    'SafetyPointPush1-v0',
     'SafetyPointButton1-v0',
+    'SafetyPointCircle1-v0',
     'SafetyCarGoal1-v0',
     'SafetyCarPush1-v0',
+    'SafetyCarButton1-v0',
+    'SafetyCarCircle1-v0',
     'SafetyAntVelocity-v1',
-    # 'SafetyHalfCheetahVelocity-v1',
+    'SafetyHumanoidVelocity-v1',
+    'SafetyHalfCheetahVelocity-v1',
     'SafetyHopperVelocity-v1',
+    'SafetyWalker2dVelocity-v1',
     'SafetySwimmerVelocity-v1',
 ]
 
@@ -18,10 +25,12 @@ algs = [
     'OnCRPO',
     'FPO',
 ]
+baseline = 'PPO'
 
 ALGNAMES = {
     'OnCRPO': 'CRPO',
     'FPO': 'FPO',
+    'PPO': 'PPO',
 }
 
 tags = [
@@ -34,9 +43,11 @@ TAGNAMES = {
     'return': 'Return',
 }
 
-# extract_training_data(envs, algs, tags)
+# extract_training_data(envs, algs + [baseline], tags)
 
-df = get_statistics(envs, tags, algs)
+df = get_statistics(envs, tags, algs + [baseline], to_file=False)
+
+normalize_by(df, baseline)
 
 pivot_df = df.pivot(
     index='env',
@@ -68,7 +79,7 @@ for env in envs:
         for tag in tags:
             key = (alg, tag)
             mean_val = pivot_df['mean'].loc[env, key]
-            row.append(f'{mean_val:.2f}')
+            row.append(f'{mean_val:.3f}')
             sums[key] = sums.get(key, 0) + mean_val
             counts[key] = counts.get(key, 0) + 1
     markdown_lines.append('|' + '|'.join(row) + '|')
@@ -78,7 +89,7 @@ for alg in algs:
     for tag in tags:
         key = (alg, tag)
         avg_val = sums[key] / counts[key]
-        avg_row.append(f'{avg_val:.2f}')
+        avg_row.append(f'{avg_val:.3f}')
 markdown_lines.append('|' + '|'.join(avg_row) + '|')
 
 with open(os.path.join(RESULT_PATH, 'CRPO.md'), 'w') as f:

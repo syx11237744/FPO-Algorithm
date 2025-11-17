@@ -331,7 +331,14 @@ def plot_legend():
     plt.close()
 
 
-def get_statistics(envs: Sequence[str], tags: Sequence[str], algs: Sequence[str], last: float = 0.1):
+def get_statistics(
+    envs: Sequence[str],
+    tags: Sequence[str],
+    algs: Sequence[str],
+    *,
+    last: float = 0.1,
+    to_file: bool = True,
+):
     data = []
     for env in envs:
         for tag in tags:
@@ -360,8 +367,9 @@ def get_statistics(envs: Sequence[str], tags: Sequence[str], algs: Sequence[str]
         .apply(mean_confidence_interval, include_groups=False)
         .reset_index()
     )
-    os.makedirs(RESULT_PATH, exist_ok=True)
-    df.to_csv(os.path.join(RESULT_PATH, 'statistics.csv'), float_format='%.2f', index=False)
+    if to_file:
+        os.makedirs(RESULT_PATH, exist_ok=True)
+        df.to_csv(os.path.join(RESULT_PATH, 'statistics.csv'), float_format='%.2f', index=False)
     return df
 
 def get_statistics_with_type(envs: Sequence[str], tags: Sequence[str], algs: Sequence[str], last: float = 0.1):
@@ -532,6 +540,18 @@ def mean_confidence_interval(group, include_groups=False):
     n = group['seed'].nunique()
     ci = 1.96 * std / np.sqrt(n) if n > 1 else 0  # 0.95 confidence interval
     return pd.Series({'mean': mean, 'ci': ci})
+
+def normalize_by(df: pd.DataFrame, baseline: str):
+    for env in df['env'].unique():
+        for tag in df['tag'].unique():
+            if not ((df['env'] == env) & (df['alg'] == baseline) & (df['tag'] == tag)).any():
+                assert False, f"Missing {baseline} data for {env}/{tag}."
+
+            bv = df.loc[(df['env'] == env) & (df['alg'] == baseline) & (df['tag'] == tag), 'mean'].values[0]
+            if bv == 0:
+                assert False, f"Baseline value for {baseline} in {env}/{tag} is zero."
+
+            df.loc[(df['env'] == env) & (df['tag'] == tag), 'mean'] /= bv
 
 def plot_cost_observation(
         data_dir: str, 
