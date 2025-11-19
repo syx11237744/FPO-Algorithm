@@ -24,6 +24,7 @@ from omnisafe.algorithms import registry
 from omnisafe.algorithms.on_policy.base.ppo import PPO
 from omnisafe.common.lagrange import Lagrange
 from omnisafe.utils import distributed
+from omnisafe.utils.CustomDataLoader import CustomDataLoader
 
 
 @registry.register
@@ -157,8 +158,8 @@ class CUP(PPO):
             old_mean = old_distribution.mean
             old_std = old_distribution.stddev
 
-        dataloader = DataLoader(
-            dataset=TensorDataset(obs, act, logp, adv_c, old_mean, old_std),
+        dataloader = CustomDataLoader(
+            obs, act, logp, adv_c, old_mean, old_std,
             batch_size=self._cfgs.algo_cfgs.batch_size,
             shuffle=True,
         )
