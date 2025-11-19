@@ -7,9 +7,7 @@ envs = [
     'SafetyPointGoal1-v0',
     'SafetyPointPush1-v0',
     'SafetyPointButton1-v0',
-    'SafetyCarPush1-v0',
     'SafetyCarButton1-v0',
-    'SafetyCarCircle1-v0',
 ]
 
 tags = [
@@ -42,9 +40,6 @@ pivot_df = df.pivot(
     columns=['tag'],
     values=['mean', 'ci'],
 )
-
-# print(pivot_df)
-# exit()
 
 markdown_lines = []
 

@@ -372,7 +372,14 @@ def get_statistics(
         df.to_csv(os.path.join(RESULT_PATH, 'statistics.csv'), float_format='%.2f', index=False)
     return df
 
-def get_statistics_with_type(envs: Sequence[str], tags: Sequence[str], algs: Sequence[str], last: float = 0.1):
+def get_statistics_with_type(
+    envs: Sequence[str],
+    tags: Sequence[str],
+    algs: Sequence[str],
+    *,
+    last: float = 0.1,
+    to_file: bool = True,
+):
     data = []
     for env in envs:
         for tag in tags:
@@ -412,8 +419,9 @@ def get_statistics_with_type(envs: Sequence[str], tags: Sequence[str], algs: Seq
         .apply(mean_confidence_interval, include_groups=False)
         .reset_index()
     )
-    os.makedirs(RESULT_PATH, exist_ok=True)
-    df.to_csv(os.path.join(RESULT_PATH, 'statistics_type.csv'), float_format='%.2f', index=False)
+    if to_file:
+        os.makedirs(RESULT_PATH, exist_ok=True)
+        df.to_csv(os.path.join(RESULT_PATH, 'statistics_type.csv'), float_format='%.2f', index=False)
     return df
 
 def get_table():
