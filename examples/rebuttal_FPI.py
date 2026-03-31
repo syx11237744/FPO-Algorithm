@@ -1,6 +1,6 @@
 import os
 from omnisafe.utils.path import RESULT_PATH
-from omnisafe.utils.visualizer import extract_training_data_with_type, get_statistics_with_type, ENVTITLES
+from omnisafe.utils.visualizer import get_statistics_with_type, ENVTITLES
 
 
 envs = [
@@ -20,26 +20,20 @@ envs = [
     'SafetyWalker2dVelocity-v1',
 ]
 
-extract_algs = [
-    'TRPOPID',
-    'FPO',
-]
-
 algs = [
     'PPO',
-    'TRPOPID',
-    'TRPOPID-cost_lim_1',
-    'FPO',
+    'SACFPI',
+    # 'FPO',
     'FPO-fea_thresh_0.05',
 ]
 
 normalize_by = 'PPO'
 
 ALGNAMES = {
-    'TRPOPID': 'TRPO-PID',
-    'TRPOPID-cost_lim_1': 'TRPO-PID CL=1',
-    'FPO': 'FPO',
-    'FPO-fea_thresh_0.05': 'FPO $\epsilon$=0.05',
+    'SACFPI': 'SAC-FPI',
+    # 'FPO': 'FPO',
+    # 'FPO-fea_thresh_0.05': 'FPO $\epsilon$=0.05',
+    'FPO-fea_thresh_0.05': 'FPO',
 }
 
 tags = [
@@ -52,16 +46,7 @@ TAGNAMES = {
     'return': 'Return',
 }
 
-extract_training_data_with_type(
-    envs=envs,
-    algs=extract_algs,
-    tags=tags
-)
-df = get_statistics_with_type(
-    envs=envs,
-    algs=algs,
-    tags=tags
-)
+df = get_statistics_with_type(envs, tags, algs)
 
 for env in envs:
     for tag in ['cost', 'return']:
@@ -119,5 +104,5 @@ for alg in algs:
         avg_row.append(f'{avg_val:.3f}')
 markdown_lines.append('|' + '|'.join(avg_row) + '|')
 
-with open(os.path.join(RESULT_PATH, 'TRPOPID.md'), 'w') as f:
+with open(os.path.join(RESULT_PATH, 'FPI.md'), 'w') as f:
     f.write('\n'.join(markdown_lines))

@@ -76,7 +76,7 @@ ENVTAGRANGES = {
         'cost': (-1, 10),
     },
     'SafetyHalfCheetahVelocity-v1': {
-        'cost': (-5, 50),
+        'cost': (-3, 30),
     },
     'SafetyHopperVelocity-v1': {
         'cost': (-5, 50),
@@ -237,7 +237,7 @@ def plot_training_curve(envs: Sequence[str], algs: Sequence[str], tags: Sequence
             dfs = []
             tag_dir = os.path.join(RESULT_PATH, env, tag)
             for tag_file_name in os.listdir(tag_dir):
-                alg, seed = tag_file_name.split('.')[0].split('_')
+                alg, seed = tag_file_name.rsplit('.', 1)[0].rsplit('_', 1)
                 if alg not in algs:
                     continue
                 tag_file = os.path.join(tag_dir, tag_file_name)
@@ -311,7 +311,8 @@ def plot_training_curve(envs: Sequence[str], algs: Sequence[str], tags: Sequence
             else:
                 left = 0.13
             plt.subplots_adjust(left=left, bottom=0.15, right=0.95, top=0.92)
-            plt.savefig(os.path.join(save_dir, f'{env}_{tag}.{EXTENSION}'), dpi=300)
+            plt.savefig(os.path.join(save_dir, f'{env}_{tag}.png'), dpi=300)
+            plt.savefig(os.path.join(save_dir, f'{env}_{tag}.pdf'))
             plt.close()
 
 
@@ -485,7 +486,7 @@ def get_table():
     }
 \end{table}'''
 
-    with open('table.tex', 'w') as f:
+    with open(os.path.join(RESULT_PATH, 'table.tex'), 'w') as f:
         f.write(latex_table)
 
 def plot_cost_return_scatter(envs: Sequence[str], algs: Sequence[str], normalize_by='PPO'):
@@ -507,6 +508,16 @@ def plot_cost_return_scatter(envs: Sequence[str], algs: Sequence[str], normalize
                 assert False, f"Baseline value for {normalize_by} in {env} is zero."
                 
             df.loc[(df['env'] == env) & (df['tag'] == tag), 'mean'] /= baseline
+
+    # alg_avg = df.groupby(['alg', 'tag'])['mean'].mean().reset_index()
+    # alg_summary = alg_avg.pivot_table(
+    #     index='alg', 
+    #     columns='tag', 
+    #     values='mean', 
+    #     aggfunc='mean'
+    # ).reset_index()
+    # alg_summary.to_csv('data.csv')
+    # exit()
 
     sns.set_theme(style='dark')
     _, ax = plt.subplots(figsize=(6, 5))
@@ -535,12 +546,14 @@ def plot_cost_return_scatter(envs: Sequence[str], algs: Sequence[str], normalize
         )
     ax.set_xlim(ax.get_xlim()[1], 0)
     ax.set_ylim(ax.get_ylim()[0], 0.8)
-    ax.set_xlabel('Normalized cost')#, fontsize=12)
-    ax.set_ylabel('Normalized return')#, fontsize=12)
-    plt.grid()#True, linestyle='--', alpha=1, linewidth=1.5)
-    plt.legend(loc='lower left')#, fontsize=10)
+    ax.set_xlabel('Normalized cost')
+    ax.set_ylabel('Normalized return')
+    plt.grid()
+    plt.legend(loc='lower left')
     plt.tight_layout()
-    plt.savefig(os.path.join(FIGURE_PATH, f'return_cost_scatter.{EXTENSION}'), dpi=300)
+    plt.savefig(os.path.join(FIGURE_PATH, 'return_cost_scatter.png'), dpi=300)
+    plt.savefig(os.path.join(FIGURE_PATH, 'return_cost_scatter.pdf'))
+    plt.close()
 
 def mean_confidence_interval(group, include_groups=False):
     mean = group['value'].mean()
