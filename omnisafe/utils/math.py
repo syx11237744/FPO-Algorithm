@@ -60,11 +60,11 @@ def discount_cumsum(vector_x: torch.Tensor, discount: float) -> torch.Tensor:
     """Compute the discounted cumulative sum of vectors.
 
     Examples:
-        >>> vector_x = torch.arange(1, 5)
+        >>> vector_x = torch.arange(1, 4)
         >>> vector_x
         tensor([1, 2, 3, 4])
         >>> discount_cumsum(vector_x, 0.9)
-        tensor([8.15, 5.23, 2.80, 1.00])
+        tensor([8.1460, 7.9400, 6.6000, 4.0000])
 
     Args:
         vector_x (torch.Tensor): A sequence of shape (B, T).

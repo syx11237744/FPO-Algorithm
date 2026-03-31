@@ -25,15 +25,38 @@ LOG_DIR = ''
 if __name__ == '__main__':
     evaluator = omnisafe.Evaluator(render_mode='rgb_array')
     scan_dir = os.scandir(os.path.join(LOG_DIR, 'torch_save'))
+    last_pt_file = None
     for item in scan_dir:
         if item.is_file() and item.name.split('.')[-1] == 'pt':
-            evaluator.load_saved(
-                save_dir=LOG_DIR,
-                model_name=item.name,
-                camera_name='track',
-                width=256,
-                height=256,
-            )
-            evaluator.render(num_episodes=1)
-            evaluator.evaluate(num_episodes=1)
+            if last_pt_file is None:
+                last_pt_file = item
+            elif item.name > last_pt_file.name:
+                last_pt_file = item
+    if last_pt_file is None:
+        raise ValueError('No pt file found in the directory.')
+    evaluator.load_saved(
+        save_dir=LOG_DIR,
+        model_name=last_pt_file.name,
+        camera_name='3',
+        # camera_id='track',
+        width=1024,
+        height=1024,
+    )
+
+    evaluator.render(num_episodes=1)
+
+    # seed = 42
+    # if not os.path.exists(LOG_DIR):
+    #     raise ValueError(f"Checkpoint directory {LOG_DIR} does not exist.")
+    # saved_dir = os.path.join(LOG_DIR, 'feasible_value')
+    # os.makedirs(saved_dir, exist_ok=True)
+    # for item in scan_dir:
+    #     evaluator.load_saved(
+    #         save_dir=LOG_DIR,
+    #         model_name=item.name,
+    #         camera_name='track',
+    #         width=256,
+    #         height=256,
+    #     )
+    #     evaluator.collect_obs(seed=seed,save_path=os.path.join(saved_dir, f'saved_obs_{item.name.split(".")[0]}_{seed}.npz'))
     scan_dir.close()

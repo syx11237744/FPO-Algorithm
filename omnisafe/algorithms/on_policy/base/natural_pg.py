@@ -15,10 +15,10 @@
 """Implementation of the Natural Policy Gradient algorithm."""
 
 import torch
-from torch.utils.data import DataLoader, TensorDataset
 
 from omnisafe.algorithms import registry
 from omnisafe.algorithms.on_policy.base.policy_gradient import PolicyGradient
+from omnisafe.utils.CustomDataLoader import CustomDataLoader
 from omnisafe.utils import distributed
 from omnisafe.utils.math import conjugate_gradients
 from omnisafe.utils.tools import (
@@ -206,8 +206,8 @@ class NaturalPG(PolicyGradient):
         )
         self._update_actor(obs, act, logp, adv_r, adv_c)
 
-        dataloader = DataLoader(
-            dataset=TensorDataset(obs, target_value_r, target_value_c),
+        dataloader = CustomDataLoader(
+            obs, target_value_r, target_value_c,
             batch_size=self._cfgs.algo_cfgs.batch_size,
             shuffle=True,
         )

@@ -50,6 +50,7 @@ from omnisafe.common.control_barrier_function.crabs.utils import create_model_an
 from omnisafe.envs.core import CMDP, make
 from omnisafe.envs.wrapper import ActionRepeat, ActionScale, ObsNormalize, TimeLimit
 from omnisafe.models.actor import ActorBuilder
+from omnisafe.models.critic import CriticBuilder
 from omnisafe.models.actor_critic import ConstraintActorCritic, ConstraintActorQCritic
 from omnisafe.models.base import Actor
 from omnisafe.utils.config import Config
@@ -84,6 +85,7 @@ class Evaluator:  # pylint: disable=too-many-instance-attributes
     ) -> None:
         """Initialize an instance of :class:`Evaluator`."""
         self._env: CMDP | None = env
+        self._pre_env: CMDP | None = env
         self._actor: Actor | None = actor
         self._actor_critic: ConstraintActorCritic | ConstraintActorQCritic | None = actor_critic
         self._dynamics: EnsembleDynamicsModel | None = dynamics
@@ -157,10 +159,10 @@ class Evaluator:  # pylint: disable=too-many-instance-attributes
         # load the environment
         if env_kwargs['env_id'] == 'SafeMetaDrive':
             env_kwargs['meta_drive_config'].update({'num_scenarios': 1})
-        self._env = make(**env_kwargs)
+        env = make(**env_kwargs)
 
-        observation_space = self._env.observation_space
-        action_space = self._env.action_space
+        observation_space = env.observation_space
+        action_space = env.action_space
         if 'Saute' in self._cfgs['algo'] or 'Simmer' in self._cfgs['algo']:
             self._safety_budget = (
                 self._cfgs.algo_cfgs.safety_budget
@@ -172,17 +174,17 @@ class Evaluator:  # pylint: disable=too-many-instance-attributes
         assert isinstance(observation_space, Box), 'The observation space must be Box.'
         assert isinstance(action_space, Box), 'The action space must be Box.'
 
+        if env.need_time_limit_wrapper:
+            env = TimeLimit(env, device=torch.device('cpu'), time_limit=env.max_episode_steps)
         if self._cfgs['algo_cfgs']['obs_normalize']:
             obs_normalizer = Normalizer(shape=observation_space.shape, clip=5)
             obs_normalizer.load_state_dict(model_params['obs_normalizer'])
-            self._env = ObsNormalize(self._env, device=torch.device('cpu'), norm=obs_normalizer)
-        if self._env.need_time_limit_wrapper:
-            self._env = TimeLimit(self._env, device=torch.device('cpu'), time_limit=1000)
-        self._env = ActionScale(self._env, device=torch.device('cpu'), low=-1.0, high=1.0)
+            env = ObsNormalize(env, device=torch.device('cpu'), norm=obs_normalizer)
+        env = ActionScale(env, device=torch.device('cpu'), low=-1.0, high=1.0)
 
         if hasattr(self._cfgs['algo_cfgs'], 'action_repeat'):
-            self._env = ActionRepeat(
-                self._env,
+            env = ActionRepeat(
+                env,
                 device=torch.device('cpu'),
                 times=self._cfgs['algo_cfgs']['action_repeat'],
             )
@@ -195,16 +197,16 @@ class Evaluator:  # pylint: disable=too-many-instance-attributes
             'CCEPETS',
         ]:
             dynamics_state_space = (
-                self._env.coordinate_observation_space
-                if self._env.coordinate_observation_space is not None
-                else self._env.observation_space
+                env.coordinate_observation_space
+                if env.coordinate_observation_space is not None
+                else env.observation_space
             )
-            assert self._env.action_space is not None and isinstance(
-                self._env.action_space.shape,
+            assert env.action_space is not None and isinstance(
+                env.action_space.shape,
                 tuple,
             )
-            if isinstance(self._env.action_space, Box):
-                action_space = self._env.action_space
+            if isinstance(env.action_space, Box):
+                action_space = env.action_space
             else:
                 raise NotImplementedError
             if self._cfgs['algo'] in ['LOOP', 'SafeLOOP']:
@@ -224,7 +226,7 @@ class Evaluator:  # pylint: disable=too-many-instance-attributes
                 action_shape=action_space.shape,
                 actor_critic=self._actor_critic,
                 rew_func=None,
-                cost_func=self._env.get_cost_from_obs_tensor,
+                cost_func=env.get_cost_from_obs_tensor,
                 terminal_func=None,
             )
             self._dynamics.ensemble_model.load_state_dict(model_params['dynamics'])
@@ -299,11 +301,26 @@ class Evaluator:  # pylint: disable=too-many-instance-attributes
                 activation=pi_cfg['activation'],
                 weight_initialization_mode=weight_initialization_mode,
             )
+
             self._actor = actor_builder.build_actor(actor_type)
             self._actor.load_state_dict(model_params['pi'])
+            if hasattr(self._cfgs, 'algo') and self._cfgs['algo'] == 'FPO':
+                self._critic = CriticBuilder(
+                    obs_space=observation_space,
+                    act_space=action_space,
+                    hidden_sizes=self._cfgs['model_cfgs']['critic']['hidden_sizes'],
+                    activation=self._cfgs['model_cfgs']['critic']['activation'],
+                    weight_initialization_mode=weight_initialization_mode,
+                    num_critics=1,
+                    use_obs_encoder=False, 
+                ).build_critic('v')
+                print('model params keys:', model_params.keys())
+                if 'critic' in model_params.keys():
+                    self._critic.load_state_dict(model_params['critic'])
 
         if self._cfgs['algo'] in ['CRABS']:
             self._init_crabs(model_params)
+        return env
 
     def _init_crabs(self, model_params: dict) -> None:
         mean_policy = MeanPolicy(self._actor)
@@ -391,10 +408,21 @@ class Evaluator:  # pylint: disable=too-many-instance-attributes
             'width': width,
             'height': height,
         }
+        pre_env_kwargs = {
+            'env_id': self._cfgs['env_id'],
+            'num_envs': 1,
+            'camera_id': camera_id,
+            'camera_name': camera_name,
+            'width': width,
+            'height': height,
+        }
+        
         if self._dict_cfgs.get('env_cfgs') is not None:
             env_kwargs.update(self._dict_cfgs['env_cfgs'])
+            pre_env_kwargs.update(self._dict_cfgs['env_cfgs'])
 
-        self.__load_model_and_env(save_dir, model_name, env_kwargs)
+        self._pre_env = self.__load_model_and_env(save_dir, model_name, pre_env_kwargs)
+        self._env = self.__load_model_and_env(save_dir, model_name, env_kwargs)
 
     def evaluate(
         self,
@@ -510,10 +538,12 @@ class Evaluator:  # pylint: disable=too-many-instance-attributes
 
     def render(  # pylint: disable=too-many-locals,too-many-arguments,too-many-branches,too-many-statements
         self,
-        num_episodes: int = 1,
+        num_episodes: int = 10,
         save_replay_path: str | None = None,
         max_render_steps: int = 2000,
         cost_criteria: float = 1.0,
+        seed: int = 42,
+        only_record_violations: bool = False,
     ) -> None:  # pragma: no cover
         """Render the environment for one episode.
 
@@ -525,8 +555,8 @@ class Evaluator:  # pylint: disable=too-many-instance-attributes
             cost_criteria (float, optional): The discount factor for the cost. Defaults to 1.0.
         """
         assert (
-            self._env is not None
-        ), 'The environment must be provided or created before rendering.'
+            self._env is not None and self._pre_env is not None
+        ), 'The environments must be provided or created before rendering.'
         assert (
             self._actor is not None or self._planner is not None
         ), 'The policy or planner must be provided or created before rendering.'
@@ -538,49 +568,44 @@ class Evaluator:  # pylint: disable=too-many-instance-attributes
         print(self._dividing_line)
 
         horizon = 1000
-        frames = []
-        obs, _ = self._env.reset()
-        if self._render_mode == 'human':
-            self._env.render()
-        elif self._render_mode == 'rgb_array':
-            frames.append(self._env.render())
-
-        episode_rewards: list[float] = []
-        episode_costs: list[float] = []
-        episode_lengths: list[float] = []
-
-        for episode_idx in range(num_episodes):
+        episodes_rendered = 0
+        base_seed = seed
+        
+        while episodes_rendered < num_episodes:
+            current_seed = base_seed + episodes_rendered
+            
+            pre_obs, _ = self._pre_env.reset(seed=current_seed)
             self._safety_obs = torch.ones(1)
             step = 0
             done = False
             ep_ret, ep_cost, length = 0.0, 0.0, 0.0
-            while (
-                not done and step <= max_render_steps
-            ):  # a big number to make sure the episode will end
+            
+            actions = []
+            
+            while not done and step <= max_render_steps:
                 if 'Saute' in self._cfgs['algo'] or 'Simmer' in self._cfgs['algo']:
-                    obs = torch.cat([obs, self._safety_obs], dim=-1)
+                    pre_obs = torch.cat([pre_obs, self._safety_obs], dim=-1)
+                
                 with torch.no_grad():
                     if self._actor is not None:
                         act = self._actor.predict(
-                            obs.reshape(
-                                -1,
-                                obs.shape[-1],  # to make sure the shape is (1, obs_dim)
-                            ),
+                            pre_obs.reshape(-1, pre_obs.shape[-1]),
                             deterministic=True,
-                        ).reshape(
-                            -1,  # to make sure the shape is (act_dim,)
-                        )
+                        ).reshape(-1)
                     elif self._planner is not None:
                         act = self._planner.output_action(
-                            obs.unsqueeze(0).to('cpu'),
-                        )[
-                            0
-                        ].squeeze(0)
+                            pre_obs.unsqueeze(0).to('cpu'),
+                        )[0].squeeze(0)
                     else:
                         raise ValueError(
                             'The policy must be provided or created before evaluating the agent.',
                         )
-                obs, rew, cost, terminated, truncated, _ = self._env.step(act)
+                
+                # 记录动作
+                actions.append(act.clone())
+                
+                pre_obs, rew, cost, terminated, truncated, _ = self._pre_env.step(act)
+                
                 if 'Saute' in self._cfgs['algo'] or 'Simmer' in self._cfgs['algo']:
                     self._safety_obs -= cost.unsqueeze(-1) / self._safety_budget
                     self._safety_obs /= self._cfgs.algo_cfgs.saute_gamma
@@ -593,13 +618,62 @@ class Evaluator:  # pylint: disable=too-many-instance-attributes
                     and ep_cost >= self._cfgs.algo_cfgs.cost_limit
                 ):
                     terminated = torch.as_tensor(True)
+                    done = True
+                    
                 length += 1
+                
+            print(f"Episode with seed {current_seed} had cost {ep_cost} and retrun {ep_ret}, rendering.")
+            
+            if only_record_violations and not (ep_cost > 0):
+                print(f"Episode with seed {current_seed} had cost {ep_cost} and return {ep_ret}, skipping (no violations).")
+                continue
+            
+            frames = []
+            obs, _ = self._env.reset(seed=current_seed)
+            
+            if self._render_mode == 'human':
+                self._env.render()
+            elif self._render_mode == 'rgb_array':
+                frames.append(self._env.render())
+                
+            self._safety_obs = torch.ones(1)
+            step = 0
+            done = False
+            render_ep_ret, render_ep_cost, render_length = 0.0, 0.0, 0.0
 
+            while step < len(actions) and not done:
+                if 'Saute' in self._cfgs['algo'] or 'Simmer' in self._cfgs['algo']:
+                    obs = torch.cat([obs, self._safety_obs], dim=-1)
+                    
+                act = actions[step]
+                obs, rew, cost, terminated, truncated, _ = self._env.step(act)
+                
+                if 'Saute' in self._cfgs['algo'] or 'Simmer' in self._cfgs['algo']:
+                    self._safety_obs -= cost.unsqueeze(-1) / self._safety_budget
+                    self._safety_obs /= self._cfgs.algo_cfgs.saute_gamma
+                    
+                step += 1
+                done = bool(terminated or truncated)
+                render_ep_ret += rew.item()
+                render_ep_cost += (cost_criteria**render_length) * cost.item()
+                
+                if (
+                    'EarlyTerminated' in self._cfgs['algo']
+                    and render_ep_cost >= self._cfgs.algo_cfgs.cost_limit
+                ):
+                    terminated = torch.as_tensor(True)
+                    done = True
+                    
+                render_length += 1
+                
                 if self._render_mode == 'rgb_array':
                     frames.append(self._env.render())
-
+            
+            assert ep_cost == render_ep_cost, "The cost of the rendered episode is not equal to the cost of the original episode."
+            
             if self._render_mode == 'rgb_array_list':
                 frames = self._env.render()
+                
             if save_replay_path is not None:
                 save_video(
                     frames,
@@ -607,23 +681,80 @@ class Evaluator:  # pylint: disable=too-many-instance-attributes
                     fps=self.fps,
                     episode_trigger=lambda x: True,
                     video_length=horizon,
-                    episode_index=episode_idx,
+                    episode_index=episodes_rendered,
                     name_prefix='eval',
                 )
-            self._env.reset()
-            frames = []
-            episode_rewards.append(ep_ret)
-            episode_costs.append(ep_cost)
-            episode_lengths.append(length)
+                
             with open(result_path, 'a+', encoding='utf-8') as f:
-                print(f'Episode {episode_idx} results:', file=f)
-                print(f'Episode reward: {ep_ret}', file=f)
-                print(f'Episode cost: {ep_cost}', file=f)
-                print(f'Episode length: {length}', file=f)
-        with open(result_path, 'a+', encoding='utf-8') as f:
-            print(self._dividing_line)
-            print('Evaluation results:', file=f)
-            print(f'Average episode reward: {np.mean(episode_rewards)}', file=f)
-            print(f'Average episode cost: {np.mean(episode_costs)}', file=f)
-            print(f'Average episode length: {np.mean(episode_lengths)}', file=f)
+                print(f'Episode {episodes_rendered} results:', file=f)
+                print(f'Episode reward: {render_ep_ret}', file=f)
+                print(f'Episode cost: {render_ep_cost}', file=f)
+                print(f'Episode length: {render_length}', file=f)
+                print(f'Used seed: {current_seed}', file=f)
+                
+            episodes_rendered += 1
+            
+        if episodes_rendered > 0:
+            with open(result_path, 'a+', encoding='utf-8') as f:
+                print(self._dividing_line, file=f)
+                print('Evaluation results:', file=f)
+                print(f'Number of episodes with cost > 0: {episodes_rendered}', file=f)
+                
         self._env.close()
+        self._pre_env.close()
+
+    def collect_obs(
+        self,
+        seed: int,
+        grid_size: int = 101,
+        x_range: tuple = (-2, 2),
+        y_range: tuple = (-2, 2),
+        save_path: str = 'saved_obs.npz',
+    ) -> dict:
+        """Collect observations from the pointgoal environment."""
+        if self._env is None or (self._actor is None and self._planner is None):
+            raise ValueError(
+                'The environment and the policy must be provided or created before evaluating the agent.',
+            )
+        
+        underlying = self._env._env._env._env._env.env.env.env.task
+        xs = np.linspace(x_range[0], x_range[1], grid_size)
+        ys = np.linspace(y_range[0], y_range[1], grid_size)
+        xs, ys = np.meshgrid(xs, ys)
+        
+        values_c = np.zeros_like(xs)
+        
+        self._env.reset(seed=seed)
+        
+        original_qvel = underlying.data.qvel.copy() if hasattr(underlying.data, 'qvel') else None
+        
+        for i in range(grid_size):
+            for j in range(grid_size):
+                pos = np.array([xs[i, j], ys[i, j]])
+                # Set the position of the goal
+                underlying.data.qpos[:2] = pos
+                
+                if original_qvel is not None:
+                    underlying.data.qvel[:] = 0
+                
+                obs = underlying.obs()
+                obs = torch.tensor(obs, device='cpu', dtype=torch.float32).unsqueeze(0)
+                # Set the acceleration to zero
+                obs[0,:2] = 0
+                with torch.no_grad():
+                    c = self._critic(obs)
+                    values_c[i, j] = c[0].item()
+            
+            if (i+1) % 10 == 0 or i+1 == grid_size:
+                print(f"进度: {i+1}/{grid_size}")
+        
+        result = {
+            'x': xs,
+            'y': ys,
+            'values_c': values_c
+        }
+
+        np.savez(save_path, **result)
+
+        return result
+        

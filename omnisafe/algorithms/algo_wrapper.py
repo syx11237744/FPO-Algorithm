@@ -57,11 +57,13 @@ class AlgoWrapper:
         self,
         algo: str,
         env_id: str,
+        seed: int|None = None,
         train_terminal_cfgs: dict[str, Any] | None = None,
         custom_cfgs: dict[str, Any] | None = None,
     ) -> None:
         """Initialize an instance of :class:`AlgoWrapper`."""
         self.algo: str = algo
+        self.seed: int = seed
         self.env_id: str = env_id
         # algo_type will set in _init_checks()
         self.train_terminal_cfgs: dict[str, Any] | None = train_terminal_cfgs
@@ -99,14 +101,26 @@ class AlgoWrapper:
                 ), 'off-policy, model-based and offline only support parallel==1!'
 
         cfgs = get_default_kwargs_yaml(self.algo, self.env_id, self.algo_type)
+        if self.seed is not None:
+            cfgs.recurisve_update({'seed': self.seed})
 
+        # import pdb; pdb.set_trace()
+        if self.train_terminal_cfgs and 'task_description' in self.train_terminal_cfgs:
+            if not hasattr(cfgs, 'logger_cfgs'):
+                cfgs.update({'logger_cfgs': {}})
+            
+            cfgs.logger_cfgs.recurisve_update({'task_description': self.train_terminal_cfgs['task_description']})
+            self.train_terminal_cfgs.pop('task_description')
         # update the cfgs from custom configurations
+        # import pdb; pdb.set_trace()
         if self.custom_cfgs:
             # avoid repeatedly record the env_id and algo
             if 'env_id' in self.custom_cfgs:
                 self.custom_cfgs.pop('env_id')
             if 'algo' in self.custom_cfgs:
                 self.custom_cfgs.pop('algo')
+            if 'seed' in self.custom_cfgs:
+                self.custom_cfgs.pop('seed')
             # validate the keys of custom configuration
             recursive_check_config(self.custom_cfgs, cfgs)
             # update the cfgs from custom configurations
@@ -120,6 +134,8 @@ class AlgoWrapper:
                 self.train_terminal_cfgs.pop('env_id')
             if 'algo' in self.train_terminal_cfgs:
                 self.train_terminal_cfgs.pop('algo')
+            if 'seed' in self.train_terminal_cfgs:
+                self.train_terminal_cfgs.pop('seed')
             # validate the keys of train_terminal_cfgs configuration
             recursive_check_config(self.train_terminal_cfgs, cfgs.train_cfgs)
             # update the cfgs.train_cfgs from train_terminal configurations

@@ -96,7 +96,10 @@ class Logger:  # pylint: disable=too-many-instance-attributes
         relpath = hms_time
 
         if seed is not None:
-            relpath = f'seed-{str(seed).zfill(3)}-{relpath}'
+            if config.logger_cfgs.task_description is not None:
+                relpath = f'seed-{str(seed).zfill(3)}-{relpath}-{config.logger_cfgs.task_description}'
+            else:
+                relpath = f'seed-{str(seed).zfill(3)}-{relpath}'
 
         self._hms_time: str = hms_time
         self._log_dir: str = os.path.join(output_dir, exp_name, relpath)
@@ -135,7 +138,9 @@ class Logger:  # pylint: disable=too-many-instance-attributes
 
         if self._use_wandb and self._maste_proc:  # pragma: no cover
             project: str = self._config.logger_cfgs.get('wandb_project', 'omnisafe')
-            name: str = f'{exp_name}-{relpath}'
+            task_description: str = self._config.logger_cfgs.task_description
+            name: str = f'{exp_name + task_description}-{relpath}'
+            # name: str = f'{exp_name}-{relpath}'
             print('project', project, 'name', name)
             wandb.init(
                 project=project,
@@ -368,9 +373,10 @@ class Logger:  # pylint: disable=too-many-instance-attributes
             )
             return mean.item(), min_val.mean().item(), max_val.mean().item(), std.item()
 
-        mean, std = dist_statistics_scalar(  # pylint: disable=unbalanced-tuple-unpacking
-            torch.tensor(vals).to(os.getenv('OMNISAFE_DEVICE', 'cpu')),
-        )
+        # mean, std = dist_statistics_scalar(  # pylint: disable=unbalanced-tuple-unpacking
+        #     torch.tensor(vals).to(os.getenv('OMNISAFE_DEVICE', 'cpu')),
+        # )
+        mean = torch.mean(torch.tensor(vals, dtype=torch.float32))
         return (mean.item(),)
 
     @property

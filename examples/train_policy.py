@@ -17,6 +17,7 @@
 import argparse
 
 import omnisafe
+print(omnisafe.__file__)
 from omnisafe.utils.tools import custom_cfgs_to_dict, update_dict
 
 
@@ -38,13 +39,6 @@ if __name__ == '__main__':
         help='the name of test environment',
     )
     parser.add_argument(
-        '--parallel',
-        default=1,
-        type=int,
-        metavar='N',
-        help='number of paralleled progress for calculations.',
-    )
-    parser.add_argument(
         '--total-steps',
         type=int,
         default=10000000,
@@ -59,18 +53,33 @@ if __name__ == '__main__':
         help='device to use for training',
     )
     parser.add_argument(
-        '--vector-env-nums',
-        type=int,
-        default=1,
-        metavar='VECTOR-ENV',
-        help='number of vector envs to use for training',
+        '--task_description',
+        type=str,
+        default='',
     )
     parser.add_argument(
-        '--torch-threads',
+        '--seed',
         type=int,
-        default=16,
-        metavar='THREADS',
-        help='number of threads to use for torch',
+        default=0,
+        metavar='SEED',
+        help='random seed for training',
+    )
+    parser.add_argument(
+        '--feasibility_threshold',
+        type=float,
+        default=0.1,
+    )
+    parser.add_argument(
+        '--weight_schedule',
+        type=str,
+        default='exp',
+        help='exp/lin/fix',
+    )
+    parser.add_argument(
+        '--feasibility_type',
+        type=str,
+        default='cdf',
+        help='cdf / cvf',
     )
     args, unparsed_args = parser.parse_known_args()
     keys = [k[2:] for k in unparsed_args[0::2]]
@@ -84,6 +93,7 @@ if __name__ == '__main__':
     agent = omnisafe.Agent(
         args.algo,
         args.env_id,
+        seed=args.seed,
         train_terminal_cfgs=vars(args),
         custom_cfgs=custom_cfgs,
     )

@@ -23,7 +23,6 @@ import torch
 import torch.nn as nn
 from rich.progress import track
 from torch.nn.utils.clip_grad import clip_grad_norm_
-from torch.utils.data import DataLoader, TensorDataset
 
 from omnisafe.adapter import OnPolicyAdapter
 from omnisafe.algorithms import registry
@@ -31,6 +30,7 @@ from omnisafe.algorithms.base_algo import BaseAlgo
 from omnisafe.common.buffer import VectorOnPolicyBuffer
 from omnisafe.common.logger import Logger
 from omnisafe.models.actor_critic.constraint_actor_critic import ConstraintActorCritic
+from omnisafe.utils.CustomDataLoader import CustomDataLoader
 from omnisafe.utils import distributed
 
 
@@ -128,6 +128,7 @@ class PolicyGradient(BaseAlgo):
             penalty_coefficient=self._cfgs.algo_cfgs.penalty_coef,
             num_envs=self._cfgs.train_cfgs.vector_env_nums,
             device=self._device,
+            cost_gamma = self._cfgs.algo_cfgs.cost_gamma,
         )
 
     def _init_log(self) -> None:
@@ -188,18 +189,9 @@ class PolicyGradient(BaseAlgo):
         self._logger.setup_torch_saver(what_to_save)
         self._logger.torch_save()
 
-        self._logger.register_key(
-            'Metrics/EpRet',
-            window_length=self._cfgs.logger_cfgs.window_lens,
-        )
-        self._logger.register_key(
-            'Metrics/EpCost',
-            window_length=self._cfgs.logger_cfgs.window_lens,
-        )
-        self._logger.register_key(
-            'Metrics/EpLen',
-            window_length=self._cfgs.logger_cfgs.window_lens,
-        )
+        self._logger.register_key('Metrics/EpRet')
+        self._logger.register_key('Metrics/EpCost')
+        self._logger.register_key('Metrics/EpLen')
 
         self._logger.register_key('Train/Epoch')
         self._logger.register_key('Train/Entropy')
@@ -356,8 +348,8 @@ class PolicyGradient(BaseAlgo):
         original_obs = obs
         old_distribution = self._actor_critic.actor(obs)
 
-        dataloader = DataLoader(
-            dataset=TensorDataset(obs, act, logp, target_value_r, target_value_c, adv_r, adv_c),
+        dataloader = CustomDataLoader(
+            obs, act, logp, target_value_r, target_value_c, adv_r, adv_c,
             batch_size=self._cfgs.algo_cfgs.batch_size,
             shuffle=True,
         )
